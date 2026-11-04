@@ -11,9 +11,11 @@ Open the repository’s `project.godot` in Godot 4 and press **F5**. This single
 - **Ranger — Overwatch:** Spend 1 action point and one bow attack to fire once when a creature moves within bow range during the enemy phase.
 - **Knight — Defend:** The equipped shield passively reduces melee damage. Spend 1 action point on Defend to reduce the next melee hit by an additional point, plus any Shield Drill ranks. The Knight starts with 16 HP, 3 movement, 3 AP, and one adjacent sword strike per turn.
 - Hover over an enemy to preview its approach and possible target. Both heroes share a turn but spend their own budgets.
-- Press **Space** or click **End Turn**. Ending a turn outside the light costs 1 HP.
+- Press **Space** or click **End Turn**. Ending a turn outside the circular firelight costs 1 HP.
 - The hero who lands the killing blow earns 4 XP. Every party member earns 6 XP for a cleared wave. Traps and ballistae do not award individual kill XP. Each hero chooses their own upgrades at a wave break or before dawn. Most upgrades have three ranks, and effective bow range caps at eight tiles including equipment. If unlocked, toggle **Pinning Shot** and click a creature to fire a slowing shot.
-- Build walls, traps, or ballistae on free lit tiles between waves.
+- Build walls, traps, or ballistae on free lit tiles between waves. Click an existing wall or ballista during preparation to enhance, fix, or dismantle it. Ballista enhancements increase range and damage, and wall enhancements increase maximum HP. Fix costs 1 supply and restores full HP. Dismantling gives no refund.
+- Each cleared wave awards 4 supplies. Unspent supplies carry into the next wave and travel with the caravan to the next campsite.
+- Open **Menu** in the upper-right or press **Esc** for audio settings, restart, or exit. Settings save locally and include master volume, effects, night ambience, and a separate music toggle.
 - Survive the night and select **Break Camp at Dawn** to collect loot marked by bags. Select a portrait during the day to equip compatible gear from the caravan stash. Swapped-out gear returns to the stash. Buy or sell at the roadside trader, and select **Set Up Camp at Dusk** to start the next defense.
 
 ### Base weapon stats
