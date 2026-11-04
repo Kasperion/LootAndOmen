@@ -6,15 +6,25 @@ A top-down, turn-based caravan defense game for solo play or cooperative parties
 
 Open the repository’s `project.godot` in Godot 4 and press **F5**. This single-player build follows the caravan from Pine Hollow to Stoneford.
 
-- Click the Ranger or Knight, or press **1** or **2**, to switch heroes. Click highlighted tiles to move. The Ranger starts with 3 movement tiles per turn, which can be split before, between, or after attacks.
-- Click a creature within bow range to shoot. The Ranger starts with 3 action points and can shoot twice per turn. Each shot spends 1 action point and 1 bow attack.
+- Click a portrait in **Party**, click the Ranger or Knight on the map, or press **1** or **2** to switch heroes and inspect their equipment. Click highlighted tiles to move. Each hero starts with 3 movement tiles per turn, which can be split before, between, or after attacks.
+- Click a creature within the selected hero’s weapon range to attack. Bows have a minimum range of 2 tiles. The Ranger starts with 3 action points and can shoot twice per turn. Each shot spends 1 action point and 1 bow attack.
 - **Ranger — Overwatch:** Spend 1 action point and one bow attack to fire once when a creature moves within bow range during the enemy phase.
-- **Knight — Defend:** Spend 1 action point to block the next melee hit against the Knight this round. The Knight starts with 16 HP, 3 movement, 3 AP, and one adjacent sword strike per turn.
+- **Knight — Defend:** The equipped shield passively reduces melee damage. Spend 1 action point on Defend to reduce the next melee hit by an additional point, plus any Shield Drill ranks. The Knight starts with 16 HP, 3 movement, 3 AP, and one adjacent sword strike per turn.
 - Hover over an enemy to preview its approach and possible target. Both heroes share a turn but spend their own budgets.
 - Press **Space** or click **End Turn**. Ending a turn outside the light costs 1 HP.
-- Earn XP for kills and surviving waves. Choose one of three upgrades at a wave break or before dawn. Most upgrades have three ranks, and effective bow range caps at eight tiles including equipment. If unlocked, toggle **Pinning Shot** and click a creature to fire a slowing shot.
+- The hero who lands the killing blow earns 4 XP. Every party member earns 6 XP for a cleared wave. Traps and ballistae do not award individual kill XP. Each hero chooses their own upgrades at a wave break or before dawn. Most upgrades have three ranks, and effective bow range caps at eight tiles including equipment. If unlocked, toggle **Pinning Shot** and click a creature to fire a slowing shot.
 - Build walls, traps, or ballistae on free lit tiles between waves.
-- Survive the night and select **Break Camp at Dawn** to collect loot marked by bags. Equip gear during the day, buy or sell at the roadside trader, and select **Set Up Camp at Dusk** to start the next defense.
+- Survive the night and select **Break Camp at Dawn** to collect loot marked by bags. Select a portrait during the day to equip compatible gear from the caravan stash. Swapped-out gear returns to the stash. Buy or sell at the roadside trader, and select **Set Up Camp at Dusk** to start the next defense.
+
+### Base weapon stats
+
+| Weapon | Range (tiles) | Damage |
+| --- | ---: | ---: |
+| Hunting Bow | 2–5 | 2 |
+| War Bow | 2–6 | 3 |
+| Longbow | 2–7 | 2 |
+| Short Sword | 1 | 3 |
+| Iron Sword | 1 | 4 |
 
 Night maps and waves are defined in `night.gd`. Gear, upgrades, and starting merchant stock are defined in `journey.gd`.
 

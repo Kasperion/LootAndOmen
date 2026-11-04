@@ -5,6 +5,8 @@ const Journey := preload("res://journey.gd")
 const BoardArt := preload("res://board_art.gd")
 const TERRAIN := [preload("res://art/pine.svg"), preload("res://art/stoneford.svg")]
 enum Day { NIGHT, DAWN, MERCHANT, DUSK, COMPLETE }
+const PORTRAITS := [preload("res://art/ranger.svg"), preload("res://art/knight.svg")]
+const SHOP := ["war_bow", "longbow", "iron_sword", "reinforced_shield"]
 const CELL := 46
 const BOARD := Vector2(32, 135)
 const INK := Color("#101923")
@@ -48,8 +50,12 @@ func _ready() -> void:
 	make_button("Ballista", "Ballista  [3]", Vector2(976, 470), 112, choose_build.bind("Ballista"))
 	make_button("advance", "End Turn", Vector2(760, 531), 328, advance)
 	make_button("restart", "Restart Journey", Vector2(760, 589), 328, restart)
-	make_button("ranger", "1  Ranger", Vector2(760, 320), 156, select_hero.bind(0))
-	make_button("knight", "2  Knight", Vector2(932, 320), 156, select_hero.bind(1))
+	for i in 2:
+		make_button("hero%d" % i, "", Vector2(754, 163 + i * 65), 323, select_hero.bind(i))
+		var card: Button = buttons["hero%d" % i]
+		card.flat = true
+		card.size.y = 60
+		card.tooltip_text = "Select %s and view their details." % night.heroes[i].title
 	make_button("special", "", Vector2(760, 470), 152, prepare_special)
 	make_button("pin", "Pinning Shot", Vector2(924, 470), 164, toggle_pin)
 	for i in 3:
@@ -57,8 +63,12 @@ func _ready() -> void:
 	for i in 8:
 		make_button("equip%d" % i, "Equip", Vector2(475, 200 + 45 * i), 95, equip.bind(i))
 		make_button("sell%d" % i, "Sell", Vector2(580, 200 + 45 * i), 115, sell.bind(i))
-	make_button("buy_bow", "Buy War Bow  [8g]", Vector2(760, 365), 328, buy.bind("war_bow"))
-	make_button("buy_armor", "Buy Hide Armor  [7g]", Vector2(760, 423), 328, buy.bind("hide_armor"))
+	for i in SHOP.size():
+		var id: String = SHOP[i]
+		var item: Dictionary = Journey.GEAR[id]
+		make_button("buy_" + id, "%s [%dg]" % [item.name, item.price],
+			Vector2(754 + (i % 2) * 165, 429 + (i / 2) * 46), 158, buy.bind(id))
+		buttons["buy_" + id].tooltip_text = Journey.item_stats(id)
 	restart()
 
 func make_button(key: String, label: String, position_at: Vector2, width: int, action: Callable) -> void:
@@ -86,18 +96,29 @@ func begin_night() -> void:
 	night.start_wave()
 	refresh()
 
-func pending_upgrades() -> Array[String]:
+func hero_to_upgrade() -> Night.Hero:
 	if day == Day.NIGHT and night.phase in [Night.Phase.BUILD, Night.Phase.VICTORY]:
-		return journey.level_choices()
-	return []
+		for hero: Night.Hero in night.heroes:
+			if not hero.character.level_choices().is_empty():
+				return hero
+	return null
+
+func pending_upgrades() -> Array[String]:
+	var hero := hero_to_upgrade()
+	if hero == null:
+		return []
+	return hero.character.level_choices()
 
 func refresh() -> void:
-	if active.hp <= 0:
+	if active.hp <= 0 and day == Day.NIGHT and night.phase == Night.Phase.PLAYER:
 		for hero: Night.Hero in night.heroes:
 			if hero.hp > 0:
 				active = hero
 				pin_selected = false
 				break
+	var leveling := hero_to_upgrade()
+	if leveling != null:
+		active = leveling
 	reach = night.reach_for(active)
 	update_intent(tile_at(get_local_mouse_position()))
 	for button: Button in buttons.values():
@@ -105,6 +126,10 @@ func refresh() -> void:
 	buttons.advance.show()
 	buttons.restart.show()
 	buttons.restart.disabled = busy
+	for i in 2:
+		var card: Button = buttons["hero%d" % i]
+		card.show()
+		card.disabled = busy or leveling != null
 	buttons.advance.disabled = busy
 	if day != Day.NIGHT:
 		refresh_day()
@@ -116,7 +141,7 @@ func refresh() -> void:
 		for i in upgrades.size():
 			var info: Array = Journey.UPGRADES[upgrades[i]]
 			var button: Button = buttons["upgrade%d" % i]
-			button.text = "%s\n%s" % [journey.upgrade_name(upgrades[i], journey.rank_of(upgrades[i]) + 1), info[1]]
+			button.text = "%s\n%s" % [Journey.upgrade_name(upgrades[i], active.character.rank_of(upgrades[i]) + 1), info[1]]
 			button.show()
 		return
 
@@ -126,11 +151,6 @@ func refresh() -> void:
 		button.visible = building
 		button.disabled = night.supplies < Night.BUILD_COST[kind]
 		button.modulate = GOLD if kind == selected_build else Color.WHITE
-	for hero: Night.Hero in night.heroes:
-		var button: Button = buttons[hero.title.to_lower()]
-		button.visible = not building and night.phase in [Night.Phase.PLAYER, Night.Phase.ENEMY]
-		button.disabled = busy or hero.hp <= 0
-		button.modulate = TEAL if hero == active else Color.WHITE
 	buttons.special.visible = night.phase == Night.Phase.PLAYER
 	buttons.special.disabled = busy or not night.can_prepare(active)
 	if active == night.ranger:
@@ -138,8 +158,8 @@ func refresh() -> void:
 		buttons.special.tooltip_text = "Spend 1 AP and one bow attack. Fire once at a creature that moves within bow range this enemy phase."
 	else:
 		buttons.special.text = "Defend Ready" if active.prepared else "Defend [1 AP]"
-		buttons.special.tooltip_text = "Spend 1 AP to block the next melee hit against the Knight this round."
-	buttons.pin.visible = night.phase == Night.Phase.PLAYER and active == night.ranger and journey.rank_of("pin") > 0
+		buttons.special.tooltip_text = "Spend 1 AP to reduce the next melee hit against the Knight by an additional %d." % (1 + active.character.rank_of("guard"))
+	buttons.pin.visible = night.phase == Night.Phase.PLAYER and active == night.ranger and active.character.rank_of("pin") > 0
 	buttons.pin.disabled = busy or active.ap == 0 or active.attacks == 0
 	buttons.pin.modulate = GOLD if pin_selected else Color.WHITE
 	if building:
@@ -159,38 +179,43 @@ func refresh_day() -> void:
 	for i in journey.inventory.size():
 		var id := journey.inventory[i]
 		var equip_button: Button = buttons["equip%d" % i]
-		equip_button.text = "Equipped" if journey.is_equipped(id) else "Equip"
-		equip_button.disabled = journey.is_equipped(id)
+		equip_button.text = "Equip"
+		equip_button.disabled = not journey.can_equip(active.character, i)
+		var equipped: String = active.character.equipment.get(Journey.GEAR[id].slot, "")
+		if not equip_button.disabled:
+			equip_button.tooltip_text = "%s: %s\nEquipped %s: %s" % [
+				Journey.GEAR[id].name, Journey.item_stats(id), Journey.GEAR[equipped].name, Journey.item_stats(equipped)]
+		else:
+			equip_button.tooltip_text = "The %s cannot use this item or already has one equipped." % active.title
 		equip_button.show()
 		if journey.can_sell(i):
 			var sell_button: Button = buttons["sell%d" % i]
 			sell_button.text = "Sell  [%dg]" % journey.sell_price(id)
 			sell_button.show()
-	for id: String in ["war_bow", "hide_armor"]:
-		var button: Button = buttons.buy_bow if id == "war_bow" else buttons.buy_armor
+	for id: String in SHOP:
+		var button: Button = buttons["buy_" + id]
 		button.visible = day == Day.MERCHANT and id in journey.stock
-		button.disabled = journey.gold < Journey.GEAR[id][6]
+		button.disabled = journey.gold < Journey.GEAR[id].price
 
 func choose_upgrade(index: int) -> void:
-	var choices := pending_upgrades()
-	if index >= choices.size():
+	var hero := hero_to_upgrade()
+	if hero == null:
 		return
-	var ranger_health := night.max_health(night.ranger)
-	var knight_health := night.max_health(night.knight)
+	var choices := hero.character.level_choices()
+	if index < 0 or index >= choices.size():
+		return
+	var previous_health := night.max_health(hero)
 	var id := choices[index]
-	if journey.upgrade(id):
-		if night.ranger.hp > 0:
-			night.ranger.hp += night.max_health(night.ranger) - ranger_health
-		if night.knight.hp > 0:
-			night.knight.hp += night.max_health(night.knight) - knight_health
-		night.message = "Learned %s." % journey.upgrade_name(id, journey.rank_of(id))
+	if hero.character.upgrade(id):
+		if hero.hp > 0:
+			hero.hp += night.max_health(hero) - previous_health
+		night.message = "%s learned %s." % [hero.title, Journey.upgrade_name(id, hero.character.rank_of(id))]
 	refresh()
 
 func select_hero(index: int) -> void:
-	var hero := night.heroes[index]
-	if busy or night.phase != Night.Phase.PLAYER or hero.hp <= 0 or active == hero:
+	if busy or hero_to_upgrade() != null:
 		return
-	active = hero
+	active = night.heroes[index]
 	pin_selected = false
 	refresh()
 
@@ -203,20 +228,22 @@ func toggle_pin() -> void:
 	refresh()
 
 func equip(index: int) -> void:
-	if journey.equip(index):
-		day_message = "Equipped %s." % Journey.GEAR[journey.inventory[index]][0]
+	if journey.can_equip(active.character, index):
+		var id := journey.inventory[index]
+		journey.equip(active.character, index)
+		day_message = "%s equipped %s." % [active.title, Journey.GEAR[id].name]
 		refresh()
 
 func buy(id: String) -> void:
 	if journey.buy(id):
-		day_message = "Bought %s. Equip it before dusk." % Journey.GEAR[id][0]
+		day_message = "Bought %s. Equip it before dusk." % Journey.GEAR[id].name
 		refresh()
 
 func sell(index: int) -> void:
 	if journey.can_sell(index):
 		var id := journey.inventory[index]
 		if journey.sell(index):
-			day_message = "Sold %s." % Journey.GEAR[id][0]
+			day_message = "Sold %s." % Journey.GEAR[id].name
 			refresh()
 
 func advance_day() -> void:
@@ -281,7 +308,7 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			advance()
 		KEY_1, KEY_2:
-			if day == Day.NIGHT and night.phase == Night.Phase.PLAYER:
+			if not busy:
 				get_viewport().set_input_as_handled()
 				select_hero(0 if event.keycode == KEY_1 else 1)
 
@@ -309,7 +336,7 @@ func play_at(tile: Vector2i) -> void:
 	var enemy := night.enemy_at(tile)
 	if enemy != null:
 		if not night.can_attack(active, tile, pin_selected):
-			night.message = "Attack needs 1 AP, an attack remaining, and a target within %d tiles." % night.attack_range(active)
+			night.message = "Attack needs 1 AP, an attack remaining, and a target at range %s." % weapon_range(active)
 			return
 		busy = true
 		refresh()
@@ -446,7 +473,8 @@ func _draw() -> void:
 		draw_day()
 		return
 	label_at(Vector2(34, 82), "NIGHT %d  /  %s" % [journey.site + 1, Journey.CAMPS[journey.site]], 15, GOLD)
-	label_at(Vector2(785, 75), "WAVE %d / %d     TURN %02d" % [night.wave, night.spawns.size(), night.turn], 20)
+	label_at(Vector2(752, 52), "FIRE %d/%d   •   SUPPLIES %d" % [night.fire_hp, Night.MAX_FIRE_HP, night.supplies], 20, GOLD)
+	label_at(Vector2(752, 80), "WAVE %d/%d   •   TURN %02d" % [night.wave, night.spawns.size(), night.turn], 16, MUTED)
 	draw_board()
 	draw_sidebar()
 	draw_effects()
@@ -520,6 +548,11 @@ func draw_tile_overlay(tile: Vector2i, hovered: Vector2i) -> void:
 		var text_color := GOLD if night.is_lit(tile) else MUTED
 		var light_status := "FIRELIGHT" if night.is_lit(tile) else "DARKNESS"
 		label_at(Vector2(601, 123), light_status, 13, text_color)
+		if night.phase == Night.Phase.PLAYER and not busy and night.enemy_at(tile) != null:
+			var gap := night.distance(active.tile, tile)
+			var valid := night.in_weapon_range(active, tile)
+			var target_text := "%d tiles  •  %d damage" % [gap, night.attack_damage(active)] if valid else "%d tiles  •  Out of weapon range" % gap
+			label_at(Vector2(34, 123), target_text, 13, TEAL if valid else RED)
 
 func polygon(at: Vector2, points: Array, color: Color) -> void:
 	var vertices := PackedVector2Array()
@@ -590,72 +623,89 @@ func draw_defense(at: Vector2, kind: String) -> void:
 			draw_line(at + Vector2(0, 12), at + Vector2(0, -13), GOLD, 3, true)
 			draw_arc(at + Vector2(0, 1), 12, PI, TAU, 18, TEAL, 2, true)
 
-func draw_sidebar() -> void:
+func weapon_range(hero: Night.Hero) -> String:
+	var minimum: int = hero.character.weapon().min
+	var maximum := night.attack_range(hero)
+	return str(maximum) if minimum == maximum else "%d–%d" % [minimum, maximum]
+
+func draw_party() -> void:
 	draw_rect(Rect2(743, 135, 345, 382), Color("#18242e"))
-	label_at(Vector2(760, 163), "CAMP STATUS", 16, GOLD)
-	label_at(Vector2(760, 190), "Fire %d/%d   •   Supplies %d" % [night.fire_hp, Night.MAX_FIRE_HP, night.supplies], 20)
-	label_at(Vector2(760, 217), "Party level %d   •   XP %d / %d" % [journey.level, journey.xp, journey.xp_goal()], 17, MUTED)
-	draw_line(Vector2(760, 230), Vector2(1072, 230), Color("#43515b"))
-	label_at(Vector2(760, 253), "%s   %d / %d HP" % [active.title, active.hp, night.max_health(active)], 18, TEAL)
-	label_at(Vector2(760, 278), "Move %d/%d   •   AP %d/%d" % [active.movement, night.movement_limit(active), active.ap, Night.MAX_AP], 17)
-	label_at(Vector2(760, 302), "Attacks %d/%d   •   Range %d" % [active.attacks, night.attack_limit(active), night.attack_range(active)], 17)
+	label_at(Vector2(756, 154), "PARTY", 15, GOLD)
+	for i in night.heroes.size():
+		var hero := night.heroes[i]
+		var row := Rect2(754, 163 + i * 65, 323, 60)
+		draw_rect(row, Color("#263d3b") if active == hero else Color("#222d36"))
+		draw_rect(row, TEAL if active == hero else Color("#40515c"), false, 1)
+		draw_texture_rect(PORTRAITS[i], Rect2(row.position + Vector2(5, 5), Vector2(50, 50)), false)
+		var hp := night.max_health(hero) if day != Day.NIGHT else hero.hp
+		var hp_ratio := float(hp) / night.max_health(hero)
+		label_at(row.position + Vector2(64, 22), "%d  %s   Lv. %d" % [i + 1, hero.title, hero.character.level], 17)
+		label_at(row.position + Vector2(233, 22), "%d/%d HP" % [hp, night.max_health(hero)], 14, PAPER)
+		draw_rect(Rect2(row.position + Vector2(64, 30), Vector2(249, 3)), Color("#101923"))
+		draw_rect(Rect2(row.position + Vector2(64, 30), Vector2(249 * hp_ratio, 3)), TEAL if hp_ratio > 0.35 else RED)
+		var move := hero.movement if day == Day.NIGHT else night.movement_limit(hero)
+		var ap := hero.ap if day == Day.NIGHT else Night.MAX_AP
+		var status := "Move %d   •   AP %d" % [move, ap] if hp > 0 else "Downed"
+		label_at(row.position + Vector2(64, 51), status, 15, MUTED)
+		if hero.prepared and day == Day.NIGHT:
+			label_at(row.position + Vector2(229, 51), "Ready", 14, GOLD)
+
+func draw_loadout() -> void:
+	var character := active.character
+	label_at(Vector2(756, 312), "%s   •   XP %d / %d" % [active.title, character.xp, character.xp_goal()], 17, TEAL)
+	label_at(Vector2(756, 337), "%d damage   •   Range %s" % [night.attack_damage(active), weapon_range(active)], 17)
+	var y := 365
+	for slot: String in character.equipment:
+		var id: String = character.equipment[slot]
+		label_at(Vector2(756, y), "%s  /  %s" % [slot.capitalize(), Journey.GEAR[id].name], 16, PAPER)
+		y += 23
+	if character.shield_guard() > 0:
+		label_at(Vector2(756, 413), "Shield −%d melee   •   Defend −%d extra" % [
+			character.shield_guard(), 1 + character.rank_of("guard")], 14, MUTED)
+
+func draw_sidebar() -> void:
+	draw_party()
 	if not pending_upgrades().is_empty():
-		label_at(Vector2(760, 337), "LEVEL UP   /   CHOOSE ONE", 18, GOLD)
+		label_at(Vector2(756, 323), "%s LEVEL UP   /   CHOOSE ONE" % active.title.to_upper(), 18, GOLD)
 	else:
+		draw_loadout()
 		match night.phase:
 			Night.Phase.VICTORY:
-				label_at(Vector2(760, 359), "DAWN BREAKS", 25, GOLD)
-				label_at(Vector2(760, 390), "The caravan survived the night.", 16, MUTED)
+				label_at(Vector2(756, 468), "DAWN BREAKS", 21, GOLD)
 			Night.Phase.DEFEAT:
-				label_at(Vector2(760, 359), "THE DARKNESS WINS", 23, RED)
-				label_at(Vector2(760, 390), "Restart to try another defense.", 16, MUTED)
+				label_at(Vector2(756, 468), "THE DARKNESS WINS", 21, RED)
 			Night.Phase.BUILD:
-				label_at(Vector2(760, 350), "BETWEEN WAVES", 21, GOLD)
-				label_at(Vector2(760, 378), "Select a defense, then a free lit tile.", 16, MUTED)
-				label_at(Vector2(760, 404), "Wall blocks. Trap triggers once.", 16, MUTED)
-				label_at(Vector2(760, 430), "Ballista fires each enemy phase.", 16, MUTED)
+				label_at(Vector2(756, 446), "Build on a free tile in firelight.", 16, GOLD)
 			_:
-				label_at(Vector2(760, 394), "Click a hero to select, or use 1 / 2.", 16, MUTED)
-				label_at(Vector2(760, 420), "Teal tiles show movement. Click a foe to attack.", 14, MUTED)
-				label_at(Vector2(760, 444), "Hover a foe to preview its route.", 16, MUTED)
+				label_at(Vector2(756, 445), "Attacks %d/%d   •   Hover a foe for intent." % [
+					active.attacks, night.attack_limit(active)], 15, MUTED)
 	label_at(Vector2(32, 670), night.message, 17, PAPER)
 
 func draw_day() -> void:
 	var titles := ["", "DAWN  /  BREAK CAMP", "DAY  /  ROADSIDE TRADER",
 		"DUSK  /  MAKE CAMP", "DAY  /  JOURNEY COMPLETE"]
 	label_at(Vector2(34, 82), titles[day], 16, GOLD)
-	label_at(Vector2(785, 75), "DAYLIGHT  /  SAFE TO EQUIP", 18, GOLD)
+	label_at(Vector2(765, 75), "DAYLIGHT  /  SAFE TO EQUIP", 18, GOLD)
 	draw_rect(Rect2(32, 135, 690, 498), Color("#202b30"))
-	draw_rect(Rect2(743, 135, 345, 382), Color("#282c2b"))
-	label_at(Vector2(51, 169), "CARAVAN INVENTORY", 20, GOLD)
+	draw_party()
+	draw_loadout()
+	label_at(Vector2(51, 169), "CARAVAN STASH", 20, GOLD)
 	label_at(Vector2(491, 169), "%d gold" % journey.gold, 20, GOLD)
 	for i in journey.inventory.size():
-		var item: Array = Journey.GEAR[journey.inventory[i]]
+		var id := journey.inventory[i]
 		var y := 200 + 45 * i
 		draw_line(Vector2(51, y), Vector2(459, y), Color("#43515b"))
-		label_at(Vector2(51, y + 22), "%s  /  %s" % [item[0], item[2]], 17)
-	label_at(Vector2(51, 597), "Bow range %d    Shot damage %d    Max HP %d" % [
-		journey.bow_range(), journey.shot_damage(), journey.max_health()], 18, TEAL)
-	label_at(Vector2(760, 166), "THE CARAVAN ROAD", 20, GOLD)
-	var stops := ["Pine Hollow", "Roadside trader", "Stoneford"]
-	var current := journey.site * 2 if day == Day.DAWN else (1 if day == Day.MERCHANT else 2)
-	for i in stops.size():
-		var at := Vector2(775, 208 + i * 44)
-		if i < stops.size() - 1:
-			draw_line(at, at + Vector2(0, 44), Color("#70695e"), 2)
-		draw_circle(at, 7 if i == current else 4, GOLD if i == current else MUTED)
-		label_at(at + Vector2(17, 6), stops[i], 17, GOLD if i == current else PAPER)
-	if day == Day.MERCHANT:
-		label_at(Vector2(760, 334), "War Bow +1 damage    Hide Armor +4 HP", 16, MUTED)
-		label_at(Vector2(760, 488), "Sell unequipped gear from your inventory.", 15, MUTED)
-	elif day == Day.DAWN:
-		label_at(Vector2(760, 334), "SALVAGED AT DAWN", 17, GOLD)
-		for i in dawn_loot.size():
-			label_at(Vector2(760, 365 + i * 24), Journey.GEAR[dawn_loot[i]][0], 17)
-		label_at(Vector2(760, 427), "Recovered 4 gold. Restored HP by dusk.", 15, MUTED)
+		label_at(Vector2(51, y + 18), Journey.GEAR[id].name, 17)
+		label_at(Vector2(51, y + 36), Journey.item_stats(id), 14, MUTED)
+	if journey.inventory.is_empty():
+		label_at(Vector2(51, 225), "The stash is empty. Equipped gear is shown in Party.", 16, MUTED)
+	label_at(Vector2(51, 588), "Pine Hollow   →   Roadside trader   →   Stoneford", 18, GOLD)
+	var route := ["", "Breaking camp at %s" % Journey.CAMPS[journey.site], "Trading on the road", "Arriving at Stoneford", "Both nights survived"]
+	label_at(Vector2(51, 612), route[day], 15, MUTED)
+	if day == Day.DAWN and not dawn_loot.is_empty():
+		label_at(Vector2(756, 449), "Salvaged %d items and 4 gold." % dawn_loot.size(), 16, GOLD)
 	elif day == Day.DUSK:
-		label_at(Vector2(760, 351), "The Ranger rests before nightfall.", 16, MUTED)
-		label_at(Vector2(760, 381), "New ground. New approaches.", 16, MUTED)
+		label_at(Vector2(756, 449), "Both heroes recover before nightfall.", 16, GOLD)
 	label_at(Vector2(32, 670), day_message, 17, PAPER)
 
 func draw_effects() -> void:

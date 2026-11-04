@@ -2,113 +2,144 @@ extends RefCounted
 
 const CAMPS := ["Pine Hollow", "Stoneford"]
 const GEAR := {
-	"hunting_bow": ["Hunting Bow", "bow", "Standard bow", 0, 0, 0, 0],
-	"travel_coat": ["Travel Coat", "armor", "Standard armor", 0, 0, 0, 0],
-	"scout_bow": ["Scout Bow", "bow", "+1 bow range", 1, 0, 0, 3],
-	"quilted_coat": ["Quilted Coat", "armor", "+2 max HP", 0, 0, 2, 3],
-	"war_bow": ["War Bow", "bow", "+1 shot damage", 0, 1, 0, 8],
-	"hide_armor": ["Hide Armor", "armor", "+4 max HP", 0, 0, 4, 7],
+	"hunting_bow": {"name": "Hunting Bow", "slot": "bow", "min": 2, "max": 5, "damage": 2, "price": 0},
+	"war_bow": {"name": "War Bow", "slot": "bow", "min": 2, "max": 6, "damage": 3, "price": 8},
+	"longbow": {"name": "Longbow", "slot": "bow", "min": 2, "max": 7, "damage": 2, "price": 7},
+	"travel_coat": {"name": "Travel Coat", "slot": "armor", "health": 0, "price": 0},
+	"quilted_coat": {"name": "Quilted Coat", "slot": "armor", "health": 2, "price": 3},
+	"short_sword": {"name": "Short Sword", "slot": "sword", "min": 1, "max": 1, "damage": 3, "price": 0},
+	"iron_sword": {"name": "Iron Sword", "slot": "sword", "min": 1, "max": 1, "damage": 4, "price": 8},
+	"militia_shield": {"name": "Militia Shield", "slot": "shield", "guard": 1, "price": 0},
+	"reinforced_shield": {"name": "Reinforced Shield", "slot": "shield", "guard": 2, "price": 7},
 }
 const UPGRADES := {
-	"range": ["Bow Range", "+1 bow range, up to 8 total", 3],
-	"move": ["Trail Runner", "+1 Ranger movement per turn", 3],
+	"range": ["Bow Range", "+1 maximum bow range, up to 8 total", 3],
+	"move": ["Trail Runner", "+1 movement each turn", 3],
 	"pin": ["Pinning Shot", "Unlock a bow attack that slows a survivor", 1],
-	"health": ["Hardy", "+2 Ranger maximum and current HP", 3],
-	"damage": ["Heavy Draw", "+1 damage on Ranger bow attacks", 3],
-	"knight_health": ["Shield Veteran", "+2 Knight maximum and current HP", 3],
-	"knight_damage": ["Sword Mastery", "+1 Knight sword damage", 3],
+	"health": ["Hardy", "+2 maximum and current HP", 3],
+	"damage": ["Weapon Mastery", "+1 damage on weapon attacks", 3],
+	"guard": ["Shield Drill", "+1 damage reduction when using Defend", 3],
 }
-const LEVEL_OFFERS := [
-	["range", "move", "pin", "knight_health", "damage", "knight_damage", "health"],
-	["knight_health", "damage", "knight_damage", "health", "move", "range", "pin"],
-	["range", "health", "knight_damage", "pin", "move", "knight_health", "damage"],
-]
 const ROMAN := ["I", "II", "III"]
 
+class Character:
+	var title: String
+	var level := 1
+	var xp := 0
+	var ranks: Dictionary = {}
+	var equipment: Dictionary
+	var weapon_slot: String
+	var upgrades: Array[String]
+	var base_hp: int
+
+	func _init(hero_name: String, health: int, slots: Dictionary, options: Array[String]) -> void:
+		title = hero_name
+		base_hp = health
+		equipment = slots
+		weapon_slot = "bow" if slots.has("bow") else "sword"
+		upgrades = options
+
+	func xp_goal() -> int:
+		return 12 + (level - 1) * 8
+
+	func rank_of(id: String) -> int:
+		return ranks.get(id, 0)
+
+	func level_choices() -> Array[String]:
+		var choices: Array[String] = []
+		if xp < xp_goal():
+			return choices
+		for offset in upgrades.size():
+			var id := upgrades[(offset + level - 1) % upgrades.size()]
+			if rank_of(id) < UPGRADES[id][2]:
+				choices.append(id)
+				if choices.size() == 3:
+					break
+		return choices
+
+	func upgrade(id: String) -> bool:
+		if id not in level_choices():
+			return false
+		xp -= xp_goal()
+		level += 1
+		ranks[id] = rank_of(id) + 1
+		return true
+
+	func weapon() -> Dictionary:
+		return GEAR[equipment[weapon_slot]]
+
+	func max_range() -> int:
+		return mini(8, int(weapon().max) + rank_of("range"))
+
+	func max_health() -> int:
+		var armor: Dictionary = GEAR.get(equipment.get("armor", ""), {})
+		return base_hp + rank_of("health") * 2 + armor.get("health", 0)
+
+	func shield_guard() -> int:
+		var shield: Dictionary = GEAR.get(equipment.get("shield", ""), {})
+		return shield.get("guard", 0)
+
+var ranger := Character.new("Ranger", 12, {"bow": "hunting_bow", "armor": "travel_coat"},
+	["range", "move", "pin", "damage", "health"])
+var knight := Character.new("Knight", 16, {"sword": "short_sword", "shield": "militia_shield"},
+	["damage", "guard", "health", "move"])
 var site := 0
-var level := 1
-var xp := 0
-var ranks: Dictionary = {}
 var gold := 4
-var inventory: Array[String] = ["hunting_bow", "travel_coat"]
-var equipment := {"bow": "hunting_bow", "armor": "travel_coat"}
-var stock: Array[String] = ["war_bow", "hide_armor"]
+var inventory: Array[String] = []
+var stock: Array[String] = ["war_bow", "longbow", "iron_sword", "reinforced_shield"]
 var daylight := false
 var trading := false
 
-func xp_goal() -> int:
-	return 12 + (level - 1) * 8
-
-func rank_of(id: String) -> int:
-	return ranks.get(id, 0)
-
-func level_choices() -> Array[String]:
-	var choices: Array[String] = []
-	if xp < xp_goal():
-		return choices
-	for id: String in LEVEL_OFFERS[(level - 1) % LEVEL_OFFERS.size()]:
-		if rank_of(id) < UPGRADES[id][2]:
-			choices.append(id)
-			if choices.size() == 3:
-				break
-	return choices
-
-func upgrade_name(id: String, rank: int) -> String:
+static func upgrade_name(id: String, rank: int) -> String:
 	var info: Array = UPGRADES[id]
 	return info[0] if info[2] == 1 else "%s %s" % [info[0], ROMAN[rank - 1]]
 
-func upgrade(id: String) -> bool:
-	if id not in level_choices():
-		return false
-	xp -= xp_goal()
-	level += 1
-	ranks[id] = rank_of(id) + 1
-	return true
-
-func bow_range() -> int:
-	return mini(8, 5 + rank_of("range") + GEAR[equipment.bow][3])
-
-func shot_damage() -> int:
-	return 2 + rank_of("damage") + GEAR[equipment.bow][4]
-
-func max_health() -> int:
-	return 12 + rank_of("health") * 2 + GEAR[equipment.armor][5]
+static func item_stats(id: String) -> String:
+	var item: Dictionary = GEAR[id]
+	if item.has("damage"):
+		var range_text := str(item.min) if item.min == item.max else "%d–%d" % [item.min, item.max]
+		return "%d damage  •  %s range" % [item.damage, range_text]
+	if item.has("guard"):
+		return "%d melee damage reduction" % item.guard
+	return "+%d maximum HP" % item.health
 
 func collect_loot(items: Array[String]) -> void:
 	inventory.append_array(items)
 	gold += 4
 
-func equip(index: int) -> bool:
+func can_equip(character: Character, index: int) -> bool:
 	if not daylight or index < 0 or index >= inventory.size():
 		return false
 	var id := inventory[index]
-	equipment[GEAR[id][1]] = id
+	var slot: String = GEAR[id].slot
+	return character.equipment.has(slot) and character.equipment[slot] != id
+
+func equip(character: Character, index: int) -> bool:
+	if not can_equip(character, index):
+		return false
+	var id := inventory[index]
+	var slot: String = GEAR[id].slot
+	inventory[index] = character.equipment[slot]
+	character.equipment[slot] = id
 	return true
 
-func is_equipped(id: String) -> bool:
-	return equipment[GEAR[id][1]] == id
-
 func buy(id: String) -> bool:
-	if not trading or id not in stock or gold < GEAR[id][6]:
+	if not trading or id not in stock or gold < GEAR[id].price:
 		return false
-	gold -= GEAR[id][6]
+	gold -= GEAR[id].price
 	stock.erase(id)
 	inventory.append(id)
 	return true
 
 func can_sell(index: int) -> bool:
-	if not trading or index < 0 or index >= inventory.size():
-		return false
-	var id := inventory[index]
-	return not is_equipped(id) or inventory.count(id) > 1
+	return trading and index >= 0 and index < inventory.size()
 
 func sell(index: int) -> bool:
 	if not can_sell(index):
 		return false
-	var id := inventory[index]
-	gold += sell_price(id)
+	gold += sell_price(inventory[index])
 	inventory.remove_at(index)
 	return true
 
 func sell_price(id: String) -> int:
-	return maxi(1, int(GEAR[id][6]) / 2)
+	return maxi(1, int(GEAR[id].price) >> 1)
