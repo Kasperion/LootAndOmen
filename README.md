@@ -6,14 +6,14 @@ A top-down, turn-based caravan defense game for solo play or cooperative parties
 
 Open the repository’s `project.godot` in Godot 4 and press **F5**. This single-player build follows the caravan from Pine Hollow to Stoneford.
 
-- Click a portrait in **Party**, click the Ranger or Knight on the map, or press **1** or **2** to switch heroes and inspect their equipment. Click highlighted tiles to move. Each hero starts with 3 movement tiles per turn, which can be split before, between, or after attacks.
+- Click a portrait in **Party**, click the Ranger or Knight on the map, or press **1** or **2** to switch heroes and inspect their equipment. Click highlighted tiles to move. Scroll to zoom, drag the field to pan, and press **F11** to toggle fullscreen. Each hero starts with 3 movement tiles per turn, which can be split before, between, or after attacks.
 - Click a creature within the selected hero’s weapon range to attack. Bows have a minimum range of 2 tiles. The Ranger starts with 3 action points and can shoot twice per turn. Each shot spends 1 action point and 1 bow attack.
 - **Ranger — Overwatch:** Spend 1 action point and one bow attack to fire once when a creature moves within bow range during the enemy phase.
-- **Knight — Defend:** The equipped shield passively reduces melee damage. Spend 1 action point on Defend to reduce the next melee hit by an additional point, plus any Shield Drill ranks. The Knight starts with 16 HP, 3 movement, 3 AP, and one adjacent sword strike per turn.
+- **Knight — Defend:** The equipped shield and armor passively reduce melee damage. Spend 1 action point on Defend to reduce the next melee hit by an additional point, plus any Shield Drill ranks. The Knight starts with 18 HP, 3 movement, 3 AP, and one adjacent sword strike per turn.
 - Hover over an enemy to preview its approach and possible target. Both heroes share a turn but spend their own budgets.
 - Press **Space** or click **End Turn**. Ending a turn outside the circular firelight costs 1 HP.
 - The hero who lands the killing blow earns 4 XP. Every party member earns 6 XP for a cleared wave. Traps and ballistae do not award individual kill XP. Each hero chooses their own upgrades at a wave break or before dawn. Most upgrades have three ranks, and effective bow range caps at eight tiles including equipment. If unlocked, toggle **Pinning Shot** and click a creature to fire a slowing shot.
-- Build walls, traps, or ballistae on free lit tiles between waves. Click an existing wall or ballista during preparation to enhance, fix, or dismantle it. Ballista enhancements increase range and damage, and wall enhancements increase maximum HP. Fix costs 1 supply and restores full HP. Dismantling gives no refund.
+- Build walls, traps, or ballistae on free lit tiles between waves. Click an existing wall or ballista during preparation to open its on-map **Upgrade**, **Repair**, and **Destroy** controls. Ballista upgrades increase range and damage, and wall upgrades increase maximum HP. Repair costs 1 supply and restores full HP. Destroy returns half the build and upgrade cost, rounded down. Adjacent wall segments join automatically.
 - Each cleared wave awards 4 supplies. Unspent supplies carry into the next wave and travel with the caravan to the next campsite.
 - Open **Menu** in the upper-right or press **Esc** for audio settings, restart, or exit. Settings save locally and include master volume, effects, night ambience, and a separate music toggle.
 - Survive the night and select **Break Camp at Dawn** to collect loot marked by bags. Select a portrait during the day to equip compatible gear from the caravan stash. Swapped-out gear returns to the stash. Buy or sell at the roadside trader, and select **Set Up Camp at Dusk** to start the next defense.
@@ -25,8 +25,8 @@ Open the repository’s `project.godot` in Godot 4 and press **F5**. This single
 | Hunting Bow | 2–5 | 2 |
 | War Bow | 2–6 | 3 |
 | Longbow | 2–7 | 2 |
-| Short Sword | 1 | 3 |
-| Iron Sword | 1 | 4 |
+| Short Sword | 1 | 5 |
+| Iron Sword | 1 | 6 |
 
 Night maps and waves are defined in `night.gd`. Gear, upgrades, and starting merchant stock are defined in `journey.gd`.
 
@@ -37,14 +37,14 @@ Night maps and waves are defined in `night.gd`. Gear, upgrades, and starting mer
 3. **Build between waves.** Spend supplies on walls, gates, traps, and ballistae. Choose where to spend them based on the terrain, the approaches to camp, and how the previous wave went.
 4. **Survive the night.** Keep the campfire alive through the waves so the caravan can continue its journey.
 
-Creatures include mutated humans, twisted animals, and abominations. Their appearance and behavior can vary by region and wave.
+Hollows, fast Skitters, and hard-hitting Gravebacks attack in larger waves. The Hollow Maw takes up four tiles and joins the final wave at each campsite.
 
 ## Grid combat
 
 The camera looks down onto a visible tile grid around the camp. Map layout, spawn locations, terrain, and campfire placement should be adjustable for playtesting.
 
 - **Player phase:** Spend movement and action points in either order. Attacks and active abilities spend action points. Items are planned. The same core rules apply in solo and co-op.
-- **Enemy phase:** Monsters move up to their movement allowance, then attack a target within range. Defend the fire by intercepting them before they reach it.
+- **Enemy phase:** Monsters pursue visible heroes or the campfire. They stop to strike as soon as they reach an adjacent target. They prefer an open path to the fire, and breach a defense when no route is open. Defend the fire by intercepting them before they reach it.
 - **Darkness:** Standing outside the campfire's safe area deals damage each turn. The board should clearly distinguish safe tiles from darkness. Keep incoming creatures readable so players can plan their approach.
 
 ### Starting combat values

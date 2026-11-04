@@ -10,7 +10,15 @@ enum Menu { CLOSED, MAIN, SETTINGS, RESTART }
 const PORTRAITS := [preload("res://art/ranger.svg"), preload("res://art/knight.svg")]
 const SHOP := ["war_bow", "longbow", "iron_sword", "reinforced_shield"]
 const CELL := 58
-const BOARD := Vector2(20, 43)
+const BOARD := Vector2.ZERO
+const VIEW := Vector2(1280, 720)
+const MONSTER_ART := {
+	"husk": preload("res://art/husk.svg"),
+	"skitter": preload("res://art/skitter.svg"),
+	"brute": preload("res://art/brute.svg"),
+	"boss": preload("res://art/boss.svg"),
+}
+const HUD := Color(0.071, 0.107, 0.13, 0.88)
 const INK := Color("#101923")
 const PAPER := Color("#ece0c1")
 const MUTED := Color("#abb5bc")
@@ -26,7 +34,17 @@ var day := Day.NIGHT
 var menu := Menu.CLOSED
 var audio := CampAudio.new()
 var sliders: Dictionary = {}
-var inspected_defense := Vector2i(-1, -1)
+var inspected_defense := Night.NO_TILE
+var camera_zoom := 1.05
+var camera_offset := Vector2.ZERO
+var pointer_button := 0
+var pointer_origin := Vector2.ZERO
+var pointer_last := Vector2.ZERO
+var dragging := false
+var attack_actor: Night.Enemy
+var attack_offset := Vector2.ZERO
+var attack_progress := 0.0
+var hit_actor: Night.Enemy
 var dawn_loot: Array[String] = []
 var day_message := ""
 var pin_selected := false
@@ -61,9 +79,10 @@ func _ready() -> void:
 	make_button("settings", "Settings", Vector2(935, 114), 328, set_menu.bind(Menu.SETTINGS))
 	make_button("restart", "Restart Journey", Vector2(935, 169), 328, set_menu.bind(Menu.RESTART))
 	make_button("exit", "Exit Game", Vector2(935, 224), 328, exit_game)
-	make_button("back", "Back", Vector2(935, 403), 328, set_menu.bind(Menu.MAIN))
+	make_button("back", "Back", Vector2(935, 452), 328, set_menu.bind(Menu.MAIN))
 	make_button("restart_confirm", "Restart Journey", Vector2(935, 170), 328, restart)
 	make_button("music", "Music", Vector2(935, 344), 328, toggle_music)
+	make_button("fullscreen", "Fullscreen", Vector2(935, 398), 328, toggle_fullscreen)
 	for i in 3:
 		var key: String = ["master", "sfx", "ambience_level"][i]
 		var slider := HSlider.new()
@@ -75,9 +94,10 @@ func _ready() -> void:
 		add_child(slider)
 		sliders[key] = slider
 	for i in 3:
-		var action: String = ["Enhance", "Fix", "Destroy"][i]
+		var action: String = ["Upgrade", "Repair", "Destroy"][i]
 		make_button("manage_" + action, action, Vector2(935 + i * 110, 425), 104, manage_defense.bind(action))
-	make_button("defense_close", "Back to Building", Vector2(935, 478), 328, close_defense)
+	make_button("defense_close", "×", Vector2.ZERO, 29, close_defense)
+	buttons.defense_close.size = Vector2(29, 29)
 	for i in 2:
 		make_button("hero%d" % i, "", Vector2(929, 74 + i * 65), 323, select_hero.bind(i))
 		var card: Button = buttons["hero%d" % i]
@@ -118,6 +138,11 @@ func set_menu(value: Menu) -> void:
 		menu = value
 		refresh()
 
+func toggle_fullscreen() -> void:
+	if DisplayServer.get_name() != "headless":
+		get_window().mode = Window.MODE_WINDOWED if get_window().mode == Window.MODE_FULLSCREEN else Window.MODE_FULLSCREEN
+	refresh()
+
 func exit_game() -> void:
 	get_tree().quit()
 
@@ -148,6 +173,11 @@ func begin_night(supplies: int = 0) -> void:
 	pin_selected = false
 	hit_until = 0.0
 	night.start_wave()
+	camera_zoom = 1.05
+	camera_offset = VIEW * 0.5 - center(Night.FIRE) * camera_zoom
+	pointer_button = 0
+	hit_actor = null
+	attack_actor = null
 	refresh()
 
 func hero_to_upgrade() -> Night.Hero:
@@ -175,7 +205,7 @@ func refresh() -> void:
 	if leveling != null:
 		active = leveling
 	reach = night.reach_for(active)
-	update_intent(tile_at(get_local_mouse_position()))
+	update_intent(tile_at(screen_to_world(get_local_mouse_position())))
 	for button: Button in buttons.values():
 		button.hide()
 	for slider: HSlider in sliders.values():
@@ -245,6 +275,8 @@ func refresh_menu() -> void:
 				slider.show()
 			buttons.music.text = "Music: On" if audio.music_enabled else "Music: Off"
 			buttons.music.show()
+			buttons.fullscreen.text = "Fullscreen: On" if get_window().mode == Window.MODE_FULLSCREEN else "Fullscreen: Off"
+			buttons.fullscreen.show()
 			buttons.back.show()
 		Menu.RESTART:
 			buttons.restart_confirm.show()
@@ -252,14 +284,31 @@ func refresh_menu() -> void:
 
 func refresh_defense() -> void:
 	var piece: Dictionary = night.defenses[inspected_defense]
-	for action: String in ["Enhance", "Fix", "Destroy"]:
+	for action: String in ["Upgrade", "Repair", "Destroy"]:
 		var button: Button = buttons["manage_" + action]
 		button.show()
 		button.disabled = not night.can_manage(inspected_defense, action)
-	buttons.manage_Enhance.text = "Max Rank" if piece.level == Night.MAX_STRUCTURE_LEVEL else "Enhance [%d]" % Night.BUILD_COST[piece.kind]
-	buttons.manage_Fix.text = "Fix [%d]" % Night.FIX_COST
-	buttons.manage_Destroy.tooltip_text = "Dismantle this defense. Supplies are not refunded."
+	buttons.manage_Upgrade.text = "Max Rank" if piece.level == Night.MAX_STRUCTURE_LEVEL else "Upgrade [%d]" % Night.BUILD_COST[piece.kind]
+	buttons.manage_Repair.text = "Repair [%d]" % Night.FIX_COST
+	buttons.manage_Destroy.text = "Destroy +%d" % night.salvage_value(piece)
+	buttons.manage_Destroy.tooltip_text = "Dismantle and recover half of construction and upgrade supplies, rounded down."
+	place_defense_popup()
 	buttons.defense_close.show()
+
+func defense_popup_position() -> Vector2:
+	var at := world_to_screen(center(inspected_defense))
+	var x := clampf(at.x - 163, 12, 572.0)
+	var y := at.y - 146
+	if y < 50:
+		y = at.y + 35
+	return Vector2(x, clampf(y, 47, VIEW.y - 127))
+
+func place_defense_popup() -> void:
+	var origin := defense_popup_position()
+	for i in 3:
+		var key: String = ["Upgrade", "Repair", "Destroy"][i]
+		buttons["manage_" + key].position = origin + Vector2(8 + i * 108, 64)
+	buttons.defense_close.position = origin + Vector2(291, 5)
 
 func manage_defense(action: String) -> void:
 	if night.manage(inspected_defense, action) and action == "Destroy":
@@ -374,7 +423,7 @@ func choose_build(kind: String) -> void:
 
 func _process(delta: float) -> void:
 	clock += delta
-	var hovered := tile_at(get_local_mouse_position())
+	var hovered := tile_at(screen_to_world(get_local_mouse_position()))
 	if hovered != intent_tile:
 		update_intent(hovered)
 	queue_redraw()
@@ -382,27 +431,67 @@ func _process(delta: float) -> void:
 func update_intent(tile: Vector2i) -> void:
 	intent_tile = tile
 	intent_path.clear()
-	intent_target = Vector2i(-1, -1)
+	intent_target = Night.NO_TILE
 	if day != Day.NIGHT or busy or menu != Menu.CLOSED or night.phase != Night.Phase.PLAYER:
 		return
 	var enemy := night.enemy_at(tile)
 	if enemy == null:
 		return
+	intent_target = night.enemy_target(enemy, enemy.tile)
+	if night.on_board(intent_target):
+		return
 	var route := night.enemy_path(enemy)
-	var destination := enemy.tile
 	for i in mini(route.size(), night.enemy_movement(enemy)):
 		var step := route[i]
+		var structure := night.structure_in_step(enemy, step)
+		if night.on_board(structure):
+			intent_target = structure
+			return
 		intent_path.append(step)
-		if night.is_structure(step):
-			intent_target = step
+		intent_target = night.enemy_target(enemy, step)
+		if night.on_board(intent_target):
 			return
-		if night.defenses.has(step) and night.defenses[step].kind == "Trap" and enemy.hp <= 3:
-			return
-		destination = step
-	intent_target = night.enemy_target(destination)
+
+func world_to_screen(point: Vector2) -> Vector2:
+	return camera_offset + point * camera_zoom
+
+func screen_to_world(point: Vector2) -> Vector2:
+	return (point - camera_offset) / camera_zoom
+
+func limit_camera() -> void:
+	var field := Vector2(Night.SIZE) * CELL * camera_zoom
+	camera_offset.x = clampf(camera_offset.x, 180 - field.x, VIEW.x - 180)
+	camera_offset.y = clampf(camera_offset.y, 145 - field.y, VIEW.y - 145)
+	if night.is_structure(inspected_defense):
+		place_defense_popup()
+
+func pointer_allowed() -> bool:
+	return day == Day.NIGHT and menu == Menu.CLOSED
 
 func _input(event: InputEvent) -> void:
+	if pointer_button != 0 and event is InputEventMouseMotion:
+		var point: Vector2 = get_global_transform_with_canvas().affine_inverse() * event.position
+		if dragging or point.distance_to(pointer_origin) > 7.0:
+			dragging = true
+			camera_offset += point - pointer_last
+			limit_camera()
+		pointer_last = point
+		get_viewport().set_input_as_handled()
+		return
+	if event is InputEventMouseButton and not event.pressed and event.button_index == pointer_button:
+		var click := pointer_button == MOUSE_BUTTON_LEFT and not dragging and pointer_allowed() and not busy
+		pointer_button = 0
+		dragging = false
+		get_viewport().set_input_as_handled()
+		if click:
+			var point: Vector2 = get_global_transform_with_canvas().affine_inverse() * event.position
+			board_click(tile_at(screen_to_world(point)))
+		return
 	if not (event is InputEventKey and event.pressed and not event.echo):
+		return
+	if event.keycode == KEY_F11:
+		get_viewport().set_input_as_handled()
+		toggle_fullscreen()
 		return
 	if event.keycode == KEY_ESCAPE:
 		get_viewport().set_input_as_handled()
@@ -425,19 +514,35 @@ func _input(event: InputEvent) -> void:
 				select_hero(0 if event.keycode == KEY_1 else 1)
 
 func _unhandled_input(event: InputEvent) -> void:
-	if busy or menu != Menu.CLOSED or day != Day.NIGHT or not pending_upgrades().is_empty():
+	if not pointer_allowed() or not (event is InputEventMouseButton and event.pressed):
 		return
-	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
-		return
-	var tile := tile_at(get_global_transform_with_canvas().affine_inverse() * event.position)
-	if not night.on_board(tile):
+	var point: Vector2 = get_global_transform_with_canvas().affine_inverse() * event.position
+	if event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+		var anchor := screen_to_world(point)
+		var factor := 1.12 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.12
+		camera_zoom = clampf(camera_zoom * factor, 0.60, 1.85)
+		camera_offset = point - anchor * camera_zoom
+		limit_camera()
+		get_viewport().set_input_as_handled()
+	elif event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_MIDDLE, MOUSE_BUTTON_RIGHT]:
+		if event.button_index == MOUSE_BUTTON_LEFT and (Rect2(918, 52, 345, 470).has_point(point)
+				or (night.is_structure(inspected_defense) and Rect2(defense_popup_position(), Vector2(328, 116)).has_point(point))):
+			return
+		pointer_button = event.button_index
+		pointer_origin = point
+		pointer_last = point
+		dragging = false
+		get_viewport().set_input_as_handled()
+
+func board_click(tile: Vector2i) -> void:
+	if not night.on_board(tile) or not pending_upgrades().is_empty():
 		return
 	match night.phase:
 		Night.Phase.BUILD:
 			if night.is_structure(tile):
 				inspected_defense = tile
 			elif night.is_structure(inspected_defense):
-				inspected_defense = Vector2i(-1, -1)
+				inspected_defense = Night.NO_TILE
 			elif not night.build(selected_build, tile):
 				night.message = "Choose a free lit tile and an affordable defense."
 			refresh()
@@ -452,7 +557,7 @@ func play_at(tile: Vector2i) -> void:
 	var enemy := night.enemy_at(tile)
 	if enemy != null:
 		if not night.can_attack(active, tile, pin_selected):
-			night.message = "Attack needs 1 AP, an attack remaining, and a target at range %s." % weapon_range(active)
+			night.message = "Attack needs 1 AP, a remaining attack, clear sight, and range %s." % weapon_range(active)
 			return
 		busy = true
 		refresh()
@@ -462,7 +567,7 @@ func play_at(tile: Vector2i) -> void:
 			audio.play_effect("sword")
 			flash(center(tile))
 			await get_tree().create_timer(0.13).timeout
-		audio.play_effect("enemy_hit")
+		react_to_hit(enemy)
 		night.attack(active, tile, pin_selected)
 		pin_selected = false
 	else:
@@ -505,57 +610,78 @@ func advance() -> void:
 		for enemy: Night.Enemy in night.enemies.duplicate():
 			if night.phase == Night.Phase.DEFEAT:
 				break
-			var route := night.enemy_path(enemy)
-			var stopped := false
-			var steps := night.enemy_movement(enemy)
-			enemy.pinned = false
-			for i in range(mini(steps, route.size())):
-				var old := enemy.tile
-				var next := route[i]
-				if night.is_structure(next):
-					audio.play_effect("wood_hit")
-					flash(center(next))
-					night.step_enemy(enemy, next)
-					stopped = true
-					await get_tree().create_timer(0.13).timeout
-					break
-				await move_piece(enemy, old, next, 0.11)
-				if not night.step_enemy(enemy, next):
-					audio.play_effect("enemy_hit")
-					flash(center(next))
-					stopped = true
-					break
-				if night.can_overwatch(enemy):
-					await projectile(center(night.ranger.tile), center(enemy.tile), TEAL)
-					audio.play_effect("enemy_hit")
-					night.fire_overwatch(enemy)
-					if not night.enemies.has(enemy):
-						stopped = true
-						break
-			if not stopped:
-				var target := night.attack_enemy_target(enemy)
-				if night.on_board(target):
-					audio.play_effect("fire_hit" if target == Night.FIRE else "ally_hit")
-					flash(center(target))
-					night.finish_if_lost()
-					await get_tree().create_timer(0.14).timeout
+			await resolve_enemy(enemy)
 	night.next_turn()
 	pin_selected = false
 	busy = false
 	refresh()
+
+func resolve_enemy(enemy: Night.Enemy) -> void:
+	var route := night.enemy_path(enemy)
+	var steps := night.enemy_movement(enemy)
+	enemy.pinned = false
+	var target := night.enemy_target(enemy, enemy.tile)
+	if night.on_board(target):
+		await enemy_strike(enemy, target)
+		return
+	for i in mini(steps, route.size()):
+		var next := route[i]
+		target = night.structure_in_step(enemy, next)
+		if night.on_board(target):
+			await enemy_strike(enemy, target)
+			return
+		await move_piece(enemy, enemy.tile, next, 0.15)
+		var previous_hp := enemy.hp
+		var survived := night.step_enemy(enemy, next)
+		if enemy.hp < previous_hp:
+			react_to_hit(enemy)
+		if not survived:
+			return
+		if night.can_overwatch(enemy):
+			await projectile(center(night.ranger.tile), center(night.overwatch_tile(enemy)), TEAL)
+			react_to_hit(enemy)
+			night.fire_overwatch(enemy)
+			if not night.enemies.has(enemy):
+				return
+		target = night.enemy_target(enemy, enemy.tile)
+		if night.on_board(target):
+			await enemy_strike(enemy, target)
+			return
+
+func enemy_strike(enemy: Night.Enemy, target: Vector2i) -> void:
+	attack_actor = enemy
+	attack_progress = 0.0
+	attack_offset = (center(target) - enemy_center(enemy, enemy.tile)).normalized() * (16.0 if enemy.size == 2 else 12.0)
+	await create_tween().tween_property(self, "attack_progress", 1.0, 0.16).finished
+	var cue := "fire_hit" if target == Night.FIRE else ("wood_hit" if night.is_structure(target) else "ally_hit")
+	audio.play_effect(cue)
+	flash(center(target))
+	night.attack_enemy_target(enemy, target)
+	night.finish_if_lost()
+	await create_tween().tween_property(self, "attack_progress", 0.0, 0.16).finished
+	attack_actor = null
 
 func resolve_ballistae() -> void:
 	for tile: Vector2i in night.defenses:
 		if night.defenses[tile].kind != "Ballista":
 			continue
 		var target := night.ballista_target(tile)
-		if target == null:
+		if not night.on_board(target):
 			continue
-		await projectile(center(tile), center(target.tile), TEAL)
-		audio.play_effect("enemy_hit")
+		await projectile(center(tile), center(target), TEAL)
+		var enemy := night.enemy_at(target)
+		react_to_hit(enemy)
 		var damage := night.ballista_damage(night.defenses[tile])
-		night.damage_enemy(target, damage)
+		night.damage_enemy(enemy, damage)
 		night.message = "A ballista dealt %d damage." % damage
+
+func react_to_hit(enemy: Night.Enemy) -> void:
+	audio.play_effect("enemy_hit")
+	hit_actor = enemy
+	flash(enemy_center(enemy, enemy.tile))
+
+func enemy_center(enemy: Night.Enemy, tile: Vector2i) -> Vector2:
+	return center(tile) + Vector2.ONE * (enemy.size - 1) * CELL * 0.5
 
 func move_piece(actor: Variant, from: Vector2i, to: Vector2i, duration: float) -> void:
 	motion_actor = actor
@@ -596,17 +722,54 @@ func _draw() -> void:
 	if day != Day.NIGHT:
 		draw_day()
 	else:
+		draw_set_transform(camera_offset, 0, Vector2.ONE * camera_zoom)
+		draw_board()
+		draw_effects()
+		draw_set_transform(Vector2.ZERO)
+		draw_rect(Rect2(0, 0, 1280, 42), HUD)
+		draw_rect(Rect2(0, 686, 908, 34), HUD)
 		label_at(Vector2(20, 27), "%s   /   NIGHT %d   •   WAVE %d/%d   •   TURN %02d" % [
 			Journey.CAMPS[journey.site], journey.site + 1, night.wave, night.spawns.size(), night.turn], 16, GOLD)
 		label_at(Vector2(924, 27), "FIRE %d/%d   •   SUPPLIES %d" % [night.fire_hp, Night.MAX_FIRE_HP, night.supplies], 17, GOLD)
-		draw_board()
+		draw_hover_tip()
 		draw_sidebar()
-		draw_effects()
+		if night.is_structure(inspected_defense) and menu == Menu.CLOSED:
+			draw_defense_popup()
 	if menu != Menu.CLOSED:
 		draw_game_menu()
 
+func draw_hover_tip() -> void:
+	if night.phase != Night.Phase.PLAYER or busy or menu != Menu.CLOSED:
+		return
+	var tile := tile_at(screen_to_world(get_local_mouse_position()))
+	var enemy := night.enemy_at(tile)
+	if enemy == null:
+		return
+	var stats: Array = Night.CREATURES[enemy.kind]
+	var gap := night.distance(active.tile, tile)
+	var valid := night.in_weapon_range(active, tile)
+	var reason := "Clear shot"
+	if gap < int(active.character.weapon().min):
+		reason = "Too close"
+	elif gap > night.attack_range(active):
+		reason = "Out of range"
+	elif not valid:
+		reason = "Sight blocked"
+	var status := "%d tiles • %s" % [gap, reason]
+	label_at(Vector2(473, 27), "%s   %d HP   •   %s" % [stats[0], enemy.hp, status], 14, TEAL if valid else RED)
+
+func draw_defense_popup() -> void:
+	var origin := defense_popup_position()
+	draw_rect(Rect2(origin, Vector2(328, 116)), Color("#1c292d"))
+	draw_rect(Rect2(origin, Vector2(328, 116)), GOLD, false, 1)
+	var piece: Dictionary = night.defenses[inspected_defense]
+	label_at(origin + Vector2(12, 23), "%s  •  Rank %d  •  %d/%d HP" % [
+		piece.kind, piece.level, piece.hp, night.structure_max_hp(piece)], 16, GOLD)
+	var detail := "%d damage  •  %d range" % [night.ballista_damage(piece), night.ballista_range(piece)] if piece.kind == "Ballista" else "Adjacent walls link into one barricade."
+	label_at(origin + Vector2(12, 48), detail, 14, MUTED)
+
 func draw_game_menu() -> void:
-	draw_rect(Rect2(918, 44, 352, 648), Color("#111c24"))
+	draw_rect(Rect2(918, 44, 352, 648), Color(0.067, 0.11, 0.14, 0.94))
 	draw_rect(Rect2(918, 44, 352, 648), Color("#5a615e"), false, 1)
 	match menu:
 		Menu.MAIN:
@@ -621,10 +784,12 @@ func draw_game_menu() -> void:
 			label_at(Vector2(935, 125), "Current journey progress will be lost.", 16, MUTED)
 
 func draw_board() -> void:
-	var hovered := tile_at(get_local_mouse_position())
+	var hovered := tile_at(screen_to_world(get_local_mouse_position()))
 	var board_rect := Rect2(BOARD, Vector2(Night.SIZE) * CELL)
 	draw_rect(board_rect.grow(3), Color("#5d5141"), false, 2)
 	draw_texture_rect(TERRAIN[journey.site], board_rect, false)
+	for tile: Vector2i in night.cliffs:
+		draw_cliff(tile)
 	for tile: Vector2i in night.rocks:
 		draw_rock(center(tile), posmod(tile.x * 5 + tile.y * 11, 6))
 	for tile: Vector2i in night.trees:
@@ -648,13 +813,17 @@ func draw_board() -> void:
 		draw_line(at + Vector2(-4, -2), at + Vector2(4, -2), Color("#483325"), 2, true)
 		draw_line(at + Vector2(-2, -6), at + Vector2(2, -6), GOLD, 2, true)
 	for tile: Vector2i in night.defenses:
-		draw_defense(center(tile), night.defenses[tile])
+		draw_defense(tile, night.defenses[tile])
 		if tile == inspected_defense:
 			draw_rect(tile_rect(tile).grow(-2), GOLD, false, 2)
 	draw_fire(center(Night.FIRE))
 	for enemy: Night.Enemy in night.enemies:
-		var at := motion_from.lerp(motion_to, motion_progress) if motion_actor is Night.Enemy and motion_actor == enemy else center(enemy.tile)
-		draw_enemy(at, enemy.hp)
+		var at := enemy_center(enemy, enemy.tile)
+		if motion_actor == enemy:
+			at = motion_from.lerp(motion_to, motion_progress) + Vector2.ONE * (enemy.size - 1) * CELL * 0.5
+		draw_enemy(at, enemy)
+	if hit_actor != null and hit_actor.hp <= 0 and hit_until > clock:
+		draw_enemy(enemy_center(hit_actor, hit_actor.tile), hit_actor)
 	for hero: Night.Hero in night.heroes:
 		if hero.hp <= 0:
 			continue
@@ -667,6 +836,20 @@ func draw_board() -> void:
 			draw_arc(at, 20, 0, TAU, 24, TEAL, 2, true)
 		if hero.prepared:
 			draw_circle(at + Vector2(15, -15), 4, GOLD)
+
+func draw_cliff(tile: Vector2i) -> void:
+	var rect := tile_rect(tile)
+	draw_rect(rect, Color("#55585c"))
+	var at := rect.position
+	var bottom := CELL if tile + Vector2i.DOWN in night.cliffs else CELL - 13
+	polygon(at, [Vector2(0, 0), Vector2(CELL, 0), Vector2(CELL, bottom),
+		Vector2(CELL * 0.66, bottom - 5), Vector2(CELL * 0.28, bottom + 2), Vector2(0, bottom)], Color("#777b72"))
+	if tile + Vector2i.DOWN not in night.cliffs:
+		draw_line(at + Vector2(0, bottom), at + Vector2(CELL * 0.27, bottom + 2), Color("#a4a08c"), 2.2, true)
+		draw_line(at + Vector2(CELL * 0.27, bottom + 2), at + Vector2(CELL, bottom), Color("#a4a08c"), 2.2, true)
+	var offset := float(posmod(tile.x * 13 + tile.y * 7, 19))
+	draw_polyline(PackedVector2Array([at + Vector2(9 + offset, 8), at + Vector2(13 + offset, 18),
+		at + Vector2(21 + offset, 22), at + Vector2(17 + offset, 31)]), Color("#41484b"), 2, true)
 
 func draw_tree(at: Vector2, variant: int) -> void:
 	draw_circle(at + Vector2(8, 9), 25, Color(0.04, 0.08, 0.07, 0.56))
@@ -713,11 +896,6 @@ func draw_tile_overlay(tile: Vector2i, hovered: Vector2i, inspected_range: int) 
 		var text_color := GOLD if night.is_lit(tile) else MUTED
 		var light_status := "FIRELIGHT" if night.is_lit(tile) else "DARKNESS"
 		label_at(rect.position + Vector2(3, CELL - 5), light_status, 9, text_color)
-		if night.phase == Night.Phase.PLAYER and not busy and night.enemy_at(tile) != null:
-			var gap := night.distance(active.tile, tile)
-			var valid := night.in_weapon_range(active, tile)
-			var target_text := "%d tiles  •  %d damage" % [gap, night.attack_damage(active)] if valid else "%d tiles  •  Out of weapon range" % gap
-			label_at(Vector2(575, 27), target_text, 14, TEAL if valid else RED)
 
 func polygon(at: Vector2, points: Array, color: Color) -> void:
 	var vertices := PackedVector2Array()
@@ -763,25 +941,37 @@ func draw_knight(at: Vector2) -> void:
 		Vector2(-7, 12), Vector2(-11, 8)], Color("#b26c56"))
 	draw_line(body + Vector2(9, 8), body + Vector2(13, -10), PAPER, 2, true)
 
-func draw_enemy(at: Vector2, hp: int) -> void:
-	draw_circle(at, 16, Color("#301e29"))
-	draw_arc(at, 16, 0, TAU, 24, RED, 1.1, true)
-	var body := at + Vector2(0, sin(clock * 7.0 + at.x) * 1.5)
-	polygon(body, [Vector2(-13, 10), Vector2(-10, -6), Vector2(-6, -12), Vector2(0, -8),
-		Vector2(7, -12), Vector2(10, -4), Vector2(13, 9), Vector2(5, 6), Vector2(-5, 8)], Color("#93616a"))
-	draw_line(body + Vector2(-5, -3), body + Vector2(4, -2), Color("#ffe1a0"), 2, true)
-	for i in hp:
-		draw_rect(Rect2(at + Vector2(-hp * 3 + i * 6, 18), Vector2(4, 3)), RED)
+func draw_enemy(at: Vector2, enemy: Night.Enemy) -> void:
+	var frame := 0
+	var pose := Vector2.ZERO
+	var tint := Color.WHITE
+	if attack_actor == enemy:
+		frame = 3
+		pose = attack_offset * attack_progress
+	elif hit_actor == enemy and hit_until > clock:
+		frame = 4
+		pose = Vector2(-5, -3) * ((hit_until - clock) / 0.23)
+		tint = Color("#ffd3bd")
+		if enemy.hp <= 0:
+			tint.a = clampf((hit_until - clock) / 0.23, 0.0, 1.0)
+	elif motion_actor == enemy:
+		frame = 1 + (int(motion_progress * 4) % 2)
+		pose.y = -absf(sin(motion_progress * TAU)) * 3.0
+	var side := float(CELL * enemy.size - 4)
+	var rect := Rect2(at + pose - Vector2.ONE * side * 0.5, Vector2.ONE * side)
+	draw_texture_rect_region(MONSTER_ART[enemy.kind], rect, Rect2(96 * frame, 0, 96, 96), tint)
+	if enemy.hp <= 0:
+		return
+	var bar_width := side * 0.74
+	draw_rect(Rect2(at + Vector2(-bar_width * 0.5, -side * 0.5), Vector2(bar_width, 5)), INK)
+	draw_rect(Rect2(at + Vector2(-bar_width * 0.5 + 1, -side * 0.5 + 1),
+		Vector2((bar_width - 2) * float(enemy.hp) / enemy.max_hp, 3)), RED)
 
-func draw_defense(at: Vector2, piece: Dictionary) -> void:
+func draw_defense(tile: Vector2i, piece: Dictionary) -> void:
+	var at := center(tile)
 	match piece.kind:
 		"Wall":
-			for x in range(-12, 13, 6):
-				polygon(at + Vector2(x, 0), [Vector2(-3, 10), Vector2(-3, -6), Vector2(0, -11),
-					Vector2(3, -6), Vector2(3, 10)], Color("#b3845c"))
-			draw_line(at + Vector2(-15, 4), at + Vector2(15, 4), INK, 2)
-			for rank in piece.level - 1:
-				draw_line(at + Vector2(-14, -2 - rank * 5), at + Vector2(14, -2 - rank * 5), Color("#bec4b7"), 2, true)
+			draw_linked_wall(tile, at, piece.level)
 		"Trap":
 			draw_arc(at, 10, 0, TAU, 16, GOLD, 2, true)
 			draw_line(at + Vector2(-9, 8), at + Vector2(9, -8), GOLD, 2, true)
@@ -796,13 +986,36 @@ func draw_defense(at: Vector2, piece: Dictionary) -> void:
 		draw_rect(Rect2(at + Vector2(-19, -25), Vector2(38, 5)), INK)
 		draw_rect(Rect2(at + Vector2(-18, -24), Vector2(36 * hp_ratio, 3)), TEAL if hp_ratio > 0.4 else RED)
 
+func draw_linked_wall(tile: Vector2i, at: Vector2, level: int) -> void:
+	var links := night.wall_links(tile)
+	var wood: Color = [Color("#ae805a"), Color("#b68e65"), Color("#bc9b78")][level - 1]
+	if links.is_empty():
+		draw_line(at + Vector2(-18, 4), at + Vector2(21, 4), Color(0.07, 0.07, 0.10, 0.72), 17)
+		draw_line(at + Vector2(-18, 0), at + Vector2(18, 0), Color("#403026"), 16)
+		draw_line(at + Vector2(-18, 0), at + Vector2(18, 0), wood, 12)
+		draw_line(at + Vector2(-17, -2), at + Vector2(17, -2), Color("#d7ad79"), 3)
+		if level > 1:
+			draw_line(at + Vector2(-17, 4), at + Vector2(17, 4), Color("#7f8b8c"), float(level))
+	for direction: Vector2i in links:
+		var arm := Vector2(direction) * CELL * 0.5
+		draw_line(at + Vector2(3, 4), at + arm + Vector2(3, 4), Color(0.07, 0.07, 0.10, 0.72), 17)
+		draw_line(at, at + arm, Color("#403026"), 16)
+		draw_line(at, at + arm, wood, 12)
+		draw_line(at, at + arm, Color("#d7ad79"), 3)
+		if level > 1:
+			draw_line(at + Vector2(-direction.y, direction.x) * 4.0,
+				at + arm + Vector2(-direction.y, direction.x) * 4.0, Color("#7f8b8c"), float(level))
+	draw_rect(Rect2(at - Vector2(8, 8), Vector2(16, 16)), Color("#41342a"))
+	draw_rect(Rect2(at - Vector2(6, 6), Vector2(12, 12)), wood)
+	draw_line(at + Vector2(-4, -4), at + Vector2(3, -4), Color("#e7bd8c"), 2, true)
+
 func weapon_range(hero: Night.Hero) -> String:
 	var minimum: int = hero.character.weapon().min
 	var maximum := night.attack_range(hero)
 	return str(maximum) if minimum == maximum else "%d–%d" % [minimum, maximum]
 
 func draw_party() -> void:
-	draw_rect(Rect2(918, 52, 345, 470), Color("#18242e"))
+	draw_rect(Rect2(918, 52, 345, 470), HUD)
 	label_at(Vector2(931, 67), "PARTY", 15, GOLD)
 	for i in night.heroes.size():
 		var hero := night.heroes[i]
@@ -833,21 +1046,13 @@ func draw_loadout() -> void:
 		label_at(Vector2(931, y), "%s  /  %s" % [slot.capitalize(), Journey.GEAR[id].name], 16, PAPER)
 		y += 23
 	if character.shield_guard() > 0:
-		label_at(Vector2(931, 413), "Shield −%d melee   •   Defend −%d extra" % [
-			character.shield_guard(), 1 + character.rank_of("guard")], 14, MUTED)
+		label_at(Vector2(931, 434), "Shield −%d   Armor −%d   Defend −%d extra" % [
+			character.shield_guard(), character.armor_guard(), 1 + character.rank_of("guard")], 14, MUTED)
 
 func draw_sidebar() -> void:
 	draw_party()
 	if not pending_upgrades().is_empty():
 		label_at(Vector2(931, 323), "%s LEVEL UP   /   CHOOSE ONE" % active.title.to_upper(), 18, GOLD)
-	elif night.phase == Night.Phase.BUILD and night.is_structure(inspected_defense):
-		var piece: Dictionary = night.defenses[inspected_defense]
-		label_at(Vector2(931, 265), "%s  /  RANK %d" % [piece.kind.to_upper(), piece.level], 21, GOLD)
-		label_at(Vector2(931, 299), "%d / %d HP   •   %d supplies" % [piece.hp, night.structure_max_hp(piece), night.supplies], 17)
-		if piece.kind == "Ballista":
-			label_at(Vector2(931, 331), "%d damage   •   %d range" % [night.ballista_damage(piece), night.ballista_range(piece)], 17)
-		label_at(Vector2(931, 366), "Enhance adds %s." % ("damage and range" if piece.kind == "Ballista" else "maximum HP"), 15, MUTED)
-		label_at(Vector2(931, 391), "Fix fully repairs the defense.", 15, MUTED)
 	else:
 		draw_loadout()
 		match night.phase:
@@ -858,7 +1063,7 @@ func draw_sidebar() -> void:
 			Night.Phase.BUILD:
 				label_at(Vector2(931, 446), "Build in firelight or click a defense to inspect.", 14, GOLD)
 			_:
-				label_at(Vector2(931, 445), "Attacks %d/%d   •   Hover a foe for intent." % [
+				label_at(Vector2(931, 456), "Attacks %d/%d   •   Hover a foe for intent." % [
 					active.attacks, night.attack_limit(active)], 15, MUTED)
 	label_at(Vector2(20, 708), night.message, 17, PAPER)
 

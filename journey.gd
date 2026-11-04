@@ -7,9 +7,10 @@ const GEAR := {
 	"longbow": {"name": "Longbow", "slot": "bow", "min": 2, "max": 7, "damage": 2, "price": 7},
 	"travel_coat": {"name": "Travel Coat", "slot": "armor", "health": 0, "price": 0},
 	"quilted_coat": {"name": "Quilted Coat", "slot": "armor", "health": 2, "price": 3},
-	"short_sword": {"name": "Short Sword", "slot": "sword", "min": 1, "max": 1, "damage": 3, "price": 0},
-	"iron_sword": {"name": "Iron Sword", "slot": "sword", "min": 1, "max": 1, "damage": 4, "price": 8},
+	"short_sword": {"name": "Short Sword", "slot": "sword", "min": 1, "max": 1, "damage": 5, "price": 0},
+	"iron_sword": {"name": "Iron Sword", "slot": "sword", "min": 1, "max": 1, "damage": 6, "price": 8},
 	"militia_shield": {"name": "Militia Shield", "slot": "shield", "guard": 1, "price": 0},
+	"ringmail": {"name": "Ringmail", "slot": "armor", "guard": 1, "price": 0},
 	"reinforced_shield": {"name": "Reinforced Shield", "slot": "shield", "guard": 2, "price": 7},
 }
 const UPGRADES := {
@@ -75,13 +76,17 @@ class Character:
 		var armor: Dictionary = GEAR.get(equipment.get("armor", ""), {})
 		return base_hp + rank_of("health") * 2 + armor.get("health", 0)
 
+	func armor_guard() -> int:
+		var armor: Dictionary = GEAR.get(equipment.get("armor", ""), {})
+		return armor.get("guard", 0)
+
 	func shield_guard() -> int:
 		var shield: Dictionary = GEAR.get(equipment.get("shield", ""), {})
 		return shield.get("guard", 0)
 
 var ranger := Character.new("Ranger", 12, {"bow": "hunting_bow", "armor": "travel_coat"},
 	["range", "move", "pin", "damage", "health"])
-var knight := Character.new("Knight", 16, {"sword": "short_sword", "shield": "militia_shield"},
+var knight := Character.new("Knight", 18, {"sword": "short_sword", "shield": "militia_shield", "armor": "ringmail"},
 	["damage", "guard", "health", "move"])
 var site := 0
 var gold := 4

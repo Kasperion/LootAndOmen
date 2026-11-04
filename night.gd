@@ -4,35 +4,53 @@ const Journey := preload("res://journey.gd")
 
 enum Phase { PLAYER, ENEMY, BUILD, VICTORY, DEFEAT }
 
-const SIZE := Vector2i(15, 11)
-const FIRE := Vector2i(7, 5)
+const SIZE := Vector2i(21, 15)
+const FIRE := Vector2i(10, 7)
 const LIGHT_RADIUS := 4
 const DARK_DAMAGE := 1
 const ENEMY_MOVE := 3
-const ENEMY_RANGE := 1
+const NO_TILE := Vector2i(-1, -1)
+const SIGHT := 9
+const CREATURES := {
+	"husk": ["Hollow", 3, 2, 3, 1],
+	"skitter": ["Skitter", 2, 2, 4, 1],
+	"brute": ["Graveback", 6, 4, 2, 1],
+	"boss": ["The Hollow Maw", 15, 5, 2, 2],
+}
+const WAVE_CREATURES := [
+	["husk", "skitter", "husk", "husk"],
+	["brute", "husk", "skitter", "husk", "brute"],
+	["husk", "skitter", "brute", "brute", "skitter", "boss"],
+]
 const MAX_AP := 3
 const MAX_FIRE_HP := 18
 const SPAWNS := [
-	[Vector2i(0, 2), Vector2i(14, 8)],
-	[Vector2i(0, 2), Vector2i(14, 8), Vector2i(0, 8)],
-	[Vector2i(0, 2), Vector2i(14, 8), Vector2i(0, 8), Vector2i(14, 2)],
+	[Vector2i(2, 4), Vector2i(18, 10), Vector2i(6, 12), Vector2i(14, 2)],
+	[Vector2i(2, 4), Vector2i(18, 10), Vector2i(6, 12), Vector2i(14, 2), Vector2i(17, 4)],
+	[Vector2i(2, 4), Vector2i(18, 10), Vector2i(6, 12), Vector2i(14, 2), Vector2i(17, 4), Vector2i(1, 7)],
 ]
-const ROCKS := [Vector2i(2, 4), Vector2i(3, 4), Vector2i(3, 5), Vector2i(11, 5),
-	Vector2i(11, 6), Vector2i(12, 6), Vector2i(6, 1), Vector2i(8, 9)]
-const STONEFORD_ROCKS := [Vector2i(3, 1), Vector2i(4, 1), Vector2i(4, 2),
-	Vector2i(9, 4), Vector2i(10, 4), Vector2i(10, 5), Vector2i(10, 6), Vector2i(11, 6),
-	Vector2i(3, 8), Vector2i(4, 8)]
+const ROCKS := [Vector2i(5, 6), Vector2i(6, 6), Vector2i(6, 7), Vector2i(14, 7),
+	Vector2i(14, 8), Vector2i(15, 8), Vector2i(9, 3), Vector2i(11, 11), Vector2i(16, 12)]
+const STONEFORD_ROCKS := [Vector2i(6, 3), Vector2i(7, 3), Vector2i(7, 4),
+	Vector2i(12, 6), Vector2i(13, 6), Vector2i(13, 7), Vector2i(13, 8), Vector2i(14, 8),
+	Vector2i(6, 10), Vector2i(7, 10), Vector2i(17, 3)]
 const STONEFORD_SPAWNS := [
-	[Vector2i(0, 5), Vector2i(14, 3)],
-	[Vector2i(0, 5), Vector2i(14, 3), Vector2i(13, 10)],
-	[Vector2i(0, 5), Vector2i(14, 3), Vector2i(13, 10), Vector2i(1, 0)],
+	[Vector2i(2, 7), Vector2i(18, 5), Vector2i(16, 12), Vector2i(7, 1)],
+	[Vector2i(2, 7), Vector2i(18, 5), Vector2i(16, 12), Vector2i(7, 1), Vector2i(12, 13)],
+	[Vector2i(2, 7), Vector2i(18, 5), Vector2i(16, 12), Vector2i(7, 1), Vector2i(12, 13), Vector2i(17, 7)],
 ]
-const PINE_TREES := [Vector2i(1, 1), Vector2i(2, 1), Vector2i(5, 2), Vector2i(8, 1),
-	Vector2i(12, 1), Vector2i(13, 3), Vector2i(1, 6), Vector2i(3, 9), Vector2i(5, 9),
-	Vector2i(10, 9), Vector2i(13, 9)]
-const FORD_TREES := [Vector2i(1, 1), Vector2i(2, 2), Vector2i(5, 1), Vector2i(9, 2),
-	Vector2i(13, 1), Vector2i(13, 6), Vector2i(1, 8), Vector2i(5, 9), Vector2i(9, 9),
-	Vector2i(11, 8), Vector2i(12, 9)]
+const PINE_TREES := [Vector2i(2, 1), Vector2i(3, 2), Vector2i(8, 2), Vector2i(11, 3),
+	Vector2i(16, 1), Vector2i(18, 3), Vector2i(3, 6), Vector2i(4, 11), Vector2i(8, 11),
+	Vector2i(13, 11), Vector2i(18, 13), Vector2i(5, 1), Vector2i(1, 12), Vector2i(19, 1)]
+const FORD_TREES := [Vector2i(2, 2), Vector2i(4, 4), Vector2i(8, 3), Vector2i(12, 4),
+	Vector2i(17, 1), Vector2i(17, 9), Vector2i(4, 10), Vector2i(8, 12), Vector2i(12, 11),
+	Vector2i(15, 10), Vector2i(19, 12), Vector2i(1, 3)]
+const PINE_CLIFFS := [Vector2i(0, 10), Vector2i(0, 11), Vector2i(0, 12), Vector2i(0, 13), Vector2i(0, 14),
+	Vector2i(1, 13), Vector2i(1, 14), Vector2i(2, 14), Vector2i(3, 14), Vector2i(4, 14),
+	Vector2i(17, 0), Vector2i(18, 0), Vector2i(19, 0), Vector2i(20, 0), Vector2i(20, 1)]
+const FORD_CLIFFS := [Vector2i(0, 0), Vector2i(1, 0), Vector2i(2, 0), Vector2i(3, 0), Vector2i(4, 0),
+	Vector2i(0, 1), Vector2i(0, 2), Vector2i(1, 1), Vector2i(19, 13), Vector2i(20, 13),
+	Vector2i(17, 14), Vector2i(18, 14), Vector2i(19, 14), Vector2i(20, 14), Vector2i(20, 12)]
 const DIRECTIONS := [Vector2i.RIGHT, Vector2i.DOWN, Vector2i.LEFT, Vector2i.UP]
 const BUILD_COST := {"Wall": 2, "Trap": 1, "Ballista": 3}
 const STRUCTURE_HP := {"Wall": 5, "Ballista": 4}
@@ -58,13 +76,22 @@ class Hero:
 class Enemy:
 	var tile: Vector2i
 	var hp: int
+	var max_hp: int
 	var pinned := false
 	var damage: int
+	var kind: String
+	var speed: int
+	var size: int
 
-	func _init(start: Vector2i, health: int, hit: int = 2) -> void:
+	func _init(start: Vector2i, health: int, hit: int = 2, creature: String = "husk",
+			move: int = ENEMY_MOVE, footprint: int = 1) -> void:
 		tile = start
 		hp = health
+		max_hp = health
 		damage = hit
+		kind = creature
+		speed = move
+		size = footprint
 
 var phase := Phase.PLAYER
 var wave := 0
@@ -78,6 +105,7 @@ var kills := 0
 var loot: Dictionary = {}
 var rocks: Array
 var trees: Array
+var cliffs: Array
 var spawns: Array
 var supplies := 0
 var enemies: Array[Enemy] = []
@@ -91,6 +119,7 @@ func _init(run: Journey = null) -> void:
 	heroes.assign([ranger, knight])
 	rocks = ROCKS if journey.site == 0 else STONEFORD_ROCKS
 	trees = PINE_TREES if journey.site == 0 else FORD_TREES
+	cliffs = PINE_CLIFFS if journey.site == 0 else FORD_CLIFFS
 	spawns = SPAWNS if journey.site == 0 else STONEFORD_SPAWNS
 
 func start_wave() -> void:
@@ -100,9 +129,12 @@ func start_wave() -> void:
 	turn = 1
 	phase = Phase.PLAYER
 	reset_actions()
-	for tile: Vector2i in spawns[wave - 1]:
-		enemies.append(Enemy.new(tile, 3 if wave == 3 else 2, 3 if wave == 3 else 2))
-	message = "Wave %d approaches. Keep the fire alive." % wave
+	for i in spawns[wave - 1].size():
+		var kind: String = WAVE_CREATURES[wave - 1][i]
+		var stats: Array = CREATURES[kind]
+		var health: int = stats[1] + (journey.site * 3 if kind == "boss" else 0)
+		enemies.append(Enemy.new(spawns[wave - 1][i], health, stats[2], kind, stats[3], stats[4]))
+	message = "The Hollow Maw has arrived." if wave == spawns.size() else "Wave %d approaches. Keep the fire alive." % wave
 
 func reset_actions() -> void:
 	for hero: Hero in heroes:
@@ -125,7 +157,7 @@ func attack_range(hero: Hero) -> int:
 
 func in_weapon_range(hero: Hero, tile: Vector2i) -> bool:
 	var gap := distance(hero.tile, tile)
-	return gap >= int(hero.character.weapon().min) and gap <= attack_range(hero)
+	return gap >= int(hero.character.weapon().min) and gap <= attack_range(hero) and has_sight(hero.tile, tile)
 
 func attack_damage(hero: Hero) -> int:
 	return int(hero.character.weapon().damage) + hero.character.rank_of("damage")
@@ -147,7 +179,7 @@ func on_board(tile: Vector2i) -> bool:
 
 func enemy_at(tile: Vector2i) -> Enemy:
 	for enemy: Enemy in enemies:
-		if enemy.tile == tile:
+		if Rect2i(enemy.tile, Vector2i.ONE * enemy.size).has_point(tile):
 			return enemy
 	return null
 
@@ -155,7 +187,7 @@ func is_structure(tile: Vector2i) -> bool:
 	return defenses.has(tile) and STRUCTURE_HP.has(defenses[tile].kind)
 
 func is_terrain_blocked(tile: Vector2i) -> bool:
-	return tile in rocks or tile in trees
+	return tile in rocks or tile in trees or tile in cliffs
 
 func structure_max_hp(piece: Dictionary) -> int:
 	return STRUCTURE_HP[piece.kind] + (piece.level - 1) * 3 if piece.kind == "Wall" else STRUCTURE_HP[piece.kind]
@@ -166,13 +198,24 @@ func ballista_range(piece: Dictionary) -> int:
 func ballista_damage(piece: Dictionary) -> int:
 	return 1 + piece.level
 
+func wall_links(tile: Vector2i) -> Array[Vector2i]:
+	var links: Array[Vector2i] = []
+	for direction: Vector2i in DIRECTIONS:
+		var neighbor := tile + direction
+		if defenses.has(neighbor) and defenses[neighbor].kind == "Wall":
+			links.append(direction)
+	return links
+
+func salvage_value(piece: Dictionary) -> int:
+	return int(BUILD_COST[piece.kind] * piece.level) >> 1
+
 func can_manage(tile: Vector2i, action: String) -> bool:
 	if phase != Phase.BUILD or not is_structure(tile):
 		return false
 	var piece: Dictionary = defenses[tile]
 	match action:
-		"Enhance": return piece.level < MAX_STRUCTURE_LEVEL and supplies >= BUILD_COST[piece.kind]
-		"Fix": return piece.hp < structure_max_hp(piece) and supplies >= FIX_COST
+		"Upgrade": return piece.level < MAX_STRUCTURE_LEVEL and supplies >= BUILD_COST[piece.kind]
+		"Repair": return piece.hp < structure_max_hp(piece) and supplies >= FIX_COST
 		"Destroy": return true
 	return false
 
@@ -181,19 +224,21 @@ func manage(tile: Vector2i, action: String) -> bool:
 		return false
 	var piece: Dictionary = defenses[tile]
 	match action:
-		"Enhance":
+		"Upgrade":
 			var previous_max := structure_max_hp(piece)
 			supplies -= BUILD_COST[piece.kind]
 			piece.level += 1
 			piece.hp += structure_max_hp(piece) - previous_max
-			message = "%s enhanced to level %d." % [piece.kind, piece.level]
-		"Fix":
+			message = "%s upgraded to level %d." % [piece.kind, piece.level]
+		"Repair":
 			supplies -= FIX_COST
 			piece.hp = structure_max_hp(piece)
 			message = "%s repaired." % piece.kind
 		"Destroy":
+			var refund := salvage_value(piece)
+			supplies += refund
 			defenses.erase(tile)
-			message = "%s dismantled." % piece.kind
+			message = "%s dismantled. Recovered %d supplies." % [piece.kind, refund]
 	return true
 
 func reach_for(hero: Hero) -> Dictionary:
@@ -274,7 +319,13 @@ func prepare(hero: Hero) -> bool:
 
 func can_overwatch(enemy: Enemy) -> bool:
 	return ranger.hp > 0 and ranger.prepared and enemies.has(enemy) \
-		and in_weapon_range(ranger, enemy.tile)
+		and on_board(overwatch_tile(enemy))
+
+func overwatch_tile(enemy: Enemy) -> Vector2i:
+	for tile: Vector2i in footprint_at(enemy.tile, enemy.size):
+		if in_weapon_range(ranger, tile):
+			return tile
+	return NO_TILE
 
 func fire_overwatch(enemy: Enemy) -> void:
 	if not can_overwatch(enemy):
@@ -361,67 +412,133 @@ func begin_enemy_phase() -> bool:
 	finish_if_lost()
 	return true
 
-func enemy_path(enemy: Enemy) -> Array[Vector2i]:
+func footprint_at(origin: Vector2i, size: int) -> Array[Vector2i]:
+	var tiles: Array[Vector2i] = [origin]
+	if size == 2:
+		tiles.append_array([origin + Vector2i.RIGHT, origin + Vector2i.DOWN, origin + Vector2i.ONE])
+	return tiles
+
+func footprint_distance(origin: Vector2i, size: int, target: Vector2i) -> int:
+	var nearest := target.clamp(origin, origin + Vector2i.ONE * (size - 1))
+	return distance(nearest, target)
+
+func sight_blocked(tile: Vector2i) -> bool:
+	return is_terrain_blocked(tile) or is_structure(tile)
+
+func has_sight(from: Vector2i, to: Vector2i) -> bool:
+	var point := from
+	var gap := (to - from).abs()
+	var step := (to - from).sign()
+	var error := gap.x - gap.y
+	while point != to:
+		var old := point
+		var doubled := error * 2
+		if doubled > -gap.y:
+			error -= gap.y
+			point.x += step.x
+		if doubled < gap.x:
+			error += gap.x
+			point.y += step.y
+		if old.x != point.x and old.y != point.y:
+			if sight_blocked(Vector2i(old.x, point.y)) and sight_blocked(Vector2i(point.x, old.y)):
+				return false
+		if point != to and sight_blocked(point):
+			return false
+	return true
+
+func enemy_goal(enemy: Enemy) -> Vector2i:
+	var goal := FIRE
+	var best := SIGHT + 1
+	for hero: Hero in heroes:
+		var gap := footprint_distance(enemy.tile, enemy.size, hero.tile)
+		if hero.hp <= 0 or gap >= best:
+			continue
+		for tile: Vector2i in footprint_at(enemy.tile, enemy.size):
+			if has_sight(tile, hero.tile):
+				goal = hero.tile
+				best = gap
+				break
+	return goal
+
+func structure_in_step(enemy: Enemy, origin: Vector2i) -> Vector2i:
+	for tile: Vector2i in footprint_at(origin, enemy.size):
+		if is_structure(tile):
+			return tile
+	return NO_TILE
+
+func can_enemy_enter(enemy: Enemy, origin: Vector2i, allow_structures: bool) -> bool:
+	if not on_board(origin) or not on_board(origin + Vector2i.ONE * (enemy.size - 1)):
+		return false
+	for tile: Vector2i in footprint_at(origin, enemy.size):
+		if tile == FIRE or hero_at(tile) != null or is_terrain_blocked(tile):
+			return false
+		if not allow_structures and is_structure(tile):
+			return false
+		var occupant := enemy_at(tile)
+		if occupant != null and occupant != enemy:
+			return false
+	return true
+
+func search_path(enemy: Enemy, goal: Vector2i, allow_structures: bool) -> Array[Vector2i]:
 	var frontier: Array[Vector2i] = [enemy.tile]
 	var previous := {enemy.tile: enemy.tile}
 	var index := 0
-	var closest := enemy.tile
 	while index < frontier.size():
 		var tile := frontier[index]
 		index += 1
-		if distance(tile, FIRE) < distance(closest, FIRE):
-			closest = tile
-		if distance(tile, FIRE) <= ENEMY_RANGE:
-			closest = tile
-			break
-		for step: Vector2i in DIRECTIONS:
-			var next := tile + step
-			if previous.has(next) or not on_board(next) or next == FIRE or hero_at(next) != null:
-				continue
-			if is_terrain_blocked(next) or enemy_at(next) != null:
-				continue
-			previous[next] = tile
-			frontier.append(next)
-	var path: Array[Vector2i] = []
-	while closest != enemy.tile:
-		path.push_front(closest)
-		closest = previous[closest]
+		if footprint_distance(tile, enemy.size, goal) == 1:
+			var path: Array[Vector2i] = []
+			while tile != enemy.tile:
+				path.push_front(tile)
+				tile = previous[tile]
+			return path
+		for direction: Vector2i in DIRECTIONS:
+			var next := tile + direction
+			if not previous.has(next) and can_enemy_enter(enemy, next, allow_structures):
+				previous[next] = tile
+				frontier.append(next)
+	return []
+
+func enemy_path(enemy: Enemy) -> Array[Vector2i]:
+	if on_board(enemy_target(enemy, enemy.tile)):
+		return []
+	var goal := enemy_goal(enemy)
+	var path := search_path(enemy, goal, false)
+	if path.is_empty() and goal != FIRE:
+		path = search_path(enemy, FIRE, false)
+	if path.is_empty():
+		path = search_path(enemy, FIRE, true)
 	return path
 
 func enemy_movement(enemy: Enemy) -> int:
-	return 1 if enemy.pinned else ENEMY_MOVE
+	return 1 if enemy.pinned else enemy.speed
 
 func step_enemy(enemy: Enemy, tile: Vector2i) -> bool:
-	if is_structure(tile):
-		var piece: Dictionary = defenses[tile]
-		piece.hp -= enemy.damage
-		if piece.hp <= 0:
-			defenses.erase(tile)
-			message = "A creature destroyed the %s." % piece.kind.to_lower()
-		else:
-			message = "A creature dealt %d damage to the %s." % [enemy.damage, piece.kind.to_lower()]
+	var obstruction := structure_in_step(enemy, tile)
+	if on_board(obstruction):
+		attack_enemy_target(enemy, obstruction)
 		return false
 	enemy.tile = tile
-	if defenses.has(tile) and defenses[tile].kind == "Trap":
-		defenses.erase(tile)
-		damage_enemy(enemy, 3)
-		message = "A creature triggered a trap."
-	return enemies.has(enemy)
+	for trap_tile: Vector2i in footprint_at(tile, enemy.size):
+		if defenses.has(trap_tile) and defenses[trap_tile].kind == "Trap":
+			defenses.erase(trap_tile)
+			damage_enemy(enemy, 3)
+			message = "A creature triggered a trap."
+			if not enemies.has(enemy):
+				return false
+	return true
 
-func enemy_target(from: Vector2i) -> Vector2i:
-	# Knight intercepts a melee attack when both heroes are adjacent.
+func enemy_target(enemy: Enemy, from: Vector2i) -> Vector2i:
+	# The Knight intercepts when both heroes are adjacent.
 	for hero: Hero in [knight, ranger]:
-		if hero.hp > 0 and distance(from, hero.tile) <= ENEMY_RANGE:
+		if hero.hp > 0 and footprint_distance(from, enemy.size, hero.tile) == 1:
 			return hero.tile
-	if distance(from, FIRE) <= ENEMY_RANGE:
-		return FIRE
-	return Vector2i(-1, -1)
+	return FIRE if footprint_distance(from, enemy.size, FIRE) == 1 else NO_TILE
 
-func attack_enemy_target(enemy: Enemy) -> Vector2i:
-	var target := enemy_target(enemy.tile)
+func attack_enemy_target(enemy: Enemy, target: Vector2i) -> void:
 	var hero := hero_at(target)
 	if hero != null:
-		var reduction := hero.character.shield_guard()
+		var reduction := hero.character.shield_guard() + hero.character.armor_guard()
 		if hero == knight and hero.prepared:
 			reduction += 1 + hero.character.rank_of("guard")
 			hero.prepared = false
@@ -429,15 +546,26 @@ func attack_enemy_target(enemy: Enemy) -> Vector2i:
 		hero.hp = maxi(0, hero.hp - damage)
 		message = "%s blocked the hit." % hero.title if damage == 0 else "%s took %d melee damage." % [hero.title, damage]
 	elif target == FIRE:
-		fire_hp = maxi(0, fire_hp - 2)
-		message = "A creature struck the campfire."
-	return target
+		fire_hp = maxi(0, fire_hp - enemy.damage)
+		message = "A creature struck the campfire for %d damage." % enemy.damage
+	elif is_structure(target):
+		var piece: Dictionary = defenses[target]
+		piece.hp -= enemy.damage
+		if piece.hp <= 0:
+			defenses.erase(target)
+			message = "A creature destroyed the %s." % piece.kind.to_lower()
+		else:
+			message = "A creature dealt %d damage to the %s." % [enemy.damage, piece.kind.to_lower()]
 
-func ballista_target(tile: Vector2i) -> Enemy:
-	var closest: Enemy
+func ballista_target(tile: Vector2i) -> Vector2i:
+	var closest := NO_TILE
+	var best := ballista_range(defenses[tile]) + 1
 	for enemy: Enemy in enemies:
-		if distance(tile, enemy.tile) <= ballista_range(defenses[tile]) and (closest == null or distance(tile, enemy.tile) < distance(tile, closest.tile)):
-			closest = enemy
+		for cell: Vector2i in footprint_at(enemy.tile, enemy.size):
+			var gap := distance(tile, cell)
+			if gap < best and has_sight(tile, cell):
+				closest = cell
+				best = gap
 	return closest
 
 func next_turn() -> void:
