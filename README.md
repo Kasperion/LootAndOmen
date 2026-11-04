@@ -2,16 +2,19 @@
 
 A top-down, turn-based caravan defense game for solo play or cooperative parties. Travel across the land by day. When night falls, make camp and keep the fire alive as creatures emerge from the encroaching darkness.
 
-## Play the first prototype
+## Play the caravan prototype
 
-Open the repository’s `project.godot` in Godot 4.3 or newer and press **F5**. The current build is a single-player campsite with three waves and animated prototype graphics.
+Open the repository’s `project.godot` in Godot 4 and press **F5**. This single-player build follows the caravan from Pine Hollow to Stoneford.
 
-- Click a teal tile to move once, up to 3 tiles. Move before shooting.
-- Click an enemy within 5 tiles to shoot. A shot costs 1 of the Ranger’s 2 action points.
-- Press **Space** or click **End Turn**. Ending a turn outside the light costs 1 HP. Creatures move up to 3 tiles and attack adjacent targets.
-- Between waves, choose a wall, trap, or ballista and place it on a free lit tile. Click **Start Next Wave** when ready.
+- Click teal tiles to move. The Ranger starts with 3 movement tiles per turn, which can be split before, between, or after attacks.
+- Click a creature within bow range to shoot. The Ranger starts with 3 action points and can shoot twice per turn. Each shot spends 1 action point and 1 bow attack.
+- Use **Brace** to spend 1 action point to absorb the next basic melee hit that turn. Hover over an enemy to preview its approach and possible target.
+- Press **Space** or click **End Turn**. Ending a turn outside the light costs 1 HP.
+- Earn XP for kills and surviving waves. Choose one of three upgrades at a wave break or before dawn. If unlocked, toggle **Pinning Shot** and click a creature to fire a slowing shot.
+- Build walls, traps, or ballistae on free lit tiles between waves.
+- Survive the night and select **Break Camp at Dawn** to collect marked drops. Equip gear during the day, buy or sell at the roadside trader, and select **Set Up Camp at Dusk** to start the next defense.
 
-The map dimensions, obstacles, campfire, and wave spawn tiles are defined in `night.gd`.
+Night maps and waves are defined in `night.gd`. Gear, upgrades, and starting merchant stock are defined in `journey.gd`.
 
 ## The caravan journey
 
@@ -26,7 +29,7 @@ Creatures include mutated humans, twisted animals, and abominations. Their appea
 
 The camera looks down onto a visible tile grid around the camp. Map layout, spawn locations, terrain, and campfire placement should be adjustable for playtesting.
 
-- **Player phase:** Move characters into position, then spend action points on attacks, character abilities, or items. The same core rules apply in solo and co-op.
+- **Player phase:** Spend movement and action points in either order. Attacks and active abilities spend action points. Items are planned. The same core rules apply in solo and co-op.
 - **Enemy phase:** Monsters move up to their movement allowance, then attack a target within range. Defend the fire by intercepting them before they reach it.
 - **Darkness:** Standing outside the campfire's safe area deals damage each turn. The board should clearly distinguish safe tiles from darkness. Keep incoming creatures readable so players can plan their approach.
 

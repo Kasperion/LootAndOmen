@@ -1,5 +1,7 @@
 extends RefCounted
 
+const Journey := preload("res://journey.gd")
+
 enum Phase { PLAYER, ENEMY, BUILD, VICTORY, DEFEAT }
 
 const SIZE := Vector2i(15, 11)
@@ -7,11 +9,10 @@ const FIRE := Vector2i(7, 5)
 const LIGHT_RADIUS := 4
 const DARK_DAMAGE := 1
 const RANGER_MOVE := 3
-const RANGER_RANGE := 5
 const ENEMY_MOVE := 3
 const ENEMY_RANGE := 1
-const MAX_AP := 2
-const MAX_RANGER_HP := 12
+const MAX_AP := 3
+const MAX_ATTACKS := 2
 const MAX_FIRE_HP := 18
 const SPAWNS := [
 	[Vector2i(0, 2), Vector2i(14, 8)],
@@ -20,12 +21,21 @@ const SPAWNS := [
 ]
 const ROCKS := [Vector2i(2, 4), Vector2i(3, 4), Vector2i(3, 5), Vector2i(11, 5),
 	Vector2i(11, 6), Vector2i(12, 6), Vector2i(6, 1), Vector2i(8, 9)]
+const STONEFORD_ROCKS := [Vector2i(3, 1), Vector2i(4, 1), Vector2i(4, 2),
+	Vector2i(9, 4), Vector2i(10, 4), Vector2i(10, 5), Vector2i(10, 6), Vector2i(11, 6),
+	Vector2i(3, 8), Vector2i(4, 8)]
+const STONEFORD_SPAWNS := [
+	[Vector2i(0, 5), Vector2i(14, 3)],
+	[Vector2i(0, 5), Vector2i(14, 3), Vector2i(13, 10)],
+	[Vector2i(0, 5), Vector2i(14, 3), Vector2i(13, 10), Vector2i(1, 0)],
+]
 const DIRECTIONS := [Vector2i.RIGHT, Vector2i.DOWN, Vector2i.LEFT, Vector2i.UP]
 const BUILD_COST := {"Wall": 2, "Trap": 1, "Ballista": 3}
 
 class Enemy:
 	var tile: Vector2i
 	var hp: int
+	var pinned := false
 
 	func _init(start: Vector2i, health: int) -> void:
 		tile = start
@@ -35,29 +45,44 @@ var phase := Phase.PLAYER
 var wave := 0
 var turn := 1
 var ranger := FIRE + Vector2i.DOWN
-var ranger_hp := MAX_RANGER_HP
+var journey: Journey
+var ranger_hp: int
 var fire_hp := MAX_FIRE_HP
 var ap := MAX_AP
-var moved := false
+var movement := RANGER_MOVE
+var attacks := MAX_ATTACKS
+var braced := false
+var kills := 0
+var loot: Dictionary = {}
+var rocks: Array
+var spawns: Array
 var supplies := 0
 var enemies: Array[Enemy] = []
 var defenses: Dictionary = {}
 var message := ""
 
+func _init(run: Journey = null) -> void:
+	journey = run if run != null else Journey.new()
+	ranger_hp = journey.max_health()
+	rocks = ROCKS if journey.site == 0 else STONEFORD_ROCKS
+	spawns = SPAWNS if journey.site == 0 else STONEFORD_SPAWNS
+
 func start_wave() -> void:
-	if wave >= SPAWNS.size() or (wave > 0 and phase != Phase.BUILD):
+	if wave >= spawns.size() or (wave > 0 and phase != Phase.BUILD):
 		return
 	wave += 1
 	turn = 1
 	phase = Phase.PLAYER
 	reset_actions()
-	for tile: Vector2i in SPAWNS[wave - 1]:
+	for tile: Vector2i in spawns[wave - 1]:
 		enemies.append(Enemy.new(tile, 3 if wave == 3 else 2))
 	message = "Wave %d approaches. Keep the fire alive." % wave
 
 func reset_actions() -> void:
 	ap = MAX_AP
-	moved = false
+	movement = RANGER_MOVE + journey.move_bonus
+	attacks = MAX_ATTACKS
+	braced = false
 
 func distance(a: Vector2i, b: Vector2i) -> int:
 	return absi(a.x - b.x) + absi(a.y - b.y)
@@ -78,7 +103,7 @@ func is_wall(tile: Vector2i) -> bool:
 	return defenses.has(tile) and defenses[tile].kind == "Wall"
 
 func ranger_reach() -> Dictionary:
-	if phase != Phase.PLAYER or moved or ap < MAX_AP:
+	if phase != Phase.PLAYER or movement == 0:
 		return {}
 	var reach := {ranger: 0}
 	var frontier: Array[Vector2i] = [ranger]
@@ -86,11 +111,11 @@ func ranger_reach() -> Dictionary:
 	while index < frontier.size():
 		var tile := frontier[index]
 		index += 1
-		if reach[tile] == RANGER_MOVE:
+		if reach[tile] == movement:
 			continue
 		for step: Vector2i in DIRECTIONS:
 			var next := tile + step
-			if reach.has(next) or not on_board(next) or next == FIRE or next in ROCKS:
+			if reach.has(next) or not on_board(next) or next == FIRE or next in rocks:
 				continue
 			if is_wall(next) or enemy_at(next) != null:
 				continue
@@ -98,35 +123,79 @@ func ranger_reach() -> Dictionary:
 			frontier.append(next)
 	return reach
 
-func move_ranger(tile: Vector2i) -> bool:
-	if tile == ranger or not ranger_reach().has(tile):
-		return false
+func move_ranger(tile: Vector2i) -> Array[Vector2i]:
+	var reach := ranger_reach()
+	var path: Array[Vector2i] = []
+	if tile == ranger or not reach.has(tile):
+		return path
+	var cursor := tile
+	while cursor != ranger:
+		path.push_front(cursor)
+		for step: Vector2i in DIRECTIONS:
+			var previous := cursor + step
+			if reach.get(previous, -1) == reach[cursor] - 1:
+				cursor = previous
+				break
+	movement -= path.size()
 	ranger = tile
-	moved = true
-	message = "Ranger moved." if is_lit(tile) else "In darkness. Return to the light next turn."
+	message = "Ranger moved." if is_lit(tile) else "Darkness deals damage if you end your turn here."
+	return path
+
+func can_shoot(tile: Vector2i, pin: bool = false) -> bool:
+	return phase == Phase.PLAYER and ap > 0 and attacks > 0 and enemy_at(tile) != null \
+		and distance(ranger, tile) <= journey.bow_range() and (not pin or journey.has_pin)
+
+func shoot(tile: Vector2i, pin: bool = false) -> bool:
+	if not can_shoot(tile, pin):
+		return false
+	var enemy := enemy_at(tile)
+	ap -= 1
+	attacks -= 1
+	var damage := journey.shot_damage()
+	enemy.pinned = enemy.pinned or pin
+	damage_enemy(enemy, damage)
+	message = "Pinning Shot dealt %d damage." % damage if pin else "Bow shot dealt %d damage." % damage
+	finish_wave_if_clear()
 	return true
 
-func shoot(tile: Vector2i) -> bool:
-	var enemy := enemy_at(tile)
-	if phase != Phase.PLAYER or enemy == null or ap == 0 or distance(ranger, tile) > RANGER_RANGE:
+func brace() -> bool:
+	if phase != Phase.PLAYER or ap == 0 or braced:
 		return false
 	ap -= 1
-	damage_enemy(enemy, 2)
-	message = "Bow shot dealt 2 damage."
-	finish_wave_if_clear()
+	braced = true
+	message = "Braced for the next enemy hit."
 	return true
 
 func damage_enemy(enemy: Enemy, amount: int) -> void:
 	enemy.hp -= amount
 	if enemy.hp <= 0:
 		enemies.erase(enemy)
+		kills += 1
+		journey.xp += 4
+		if kills == 1 or kills == 4:
+			var id := "scout_bow" if (kills == 1) != (journey.site == 1) else "quilted_coat"
+			if not loot.has(enemy.tile):
+				loot[enemy.tile] = []
+			loot[enemy.tile].append(id)
+
+func collect_loot() -> Array[String]:
+	var items: Array[String] = []
+	if phase != Phase.VICTORY or journey.daylight:
+		return items
+	for pile: Array in loot.values():
+		for id: String in pile:
+			items.append(id)
+	journey.collect_loot(items)
+	journey.daylight = true
+	loot.clear()
+	return items
 
 func build(kind: String, tile: Vector2i) -> bool:
 	if phase != Phase.BUILD or not BUILD_COST.has(kind) or supplies < BUILD_COST[kind]:
 		return false
 	if not on_board(tile) or not is_lit(tile) or tile == FIRE or tile == ranger:
 		return false
-	if tile in ROCKS or defenses.has(tile):
+	if tile in rocks or defenses.has(tile):
 		return false
 	supplies -= BUILD_COST[kind]
 	defenses[tile] = {"kind": kind, "hp": 3}
@@ -134,9 +203,10 @@ func build(kind: String, tile: Vector2i) -> bool:
 	return true
 
 func finish_wave_if_clear() -> bool:
-	if not enemies.is_empty():
+	if phase not in [Phase.PLAYER, Phase.ENEMY] or not enemies.is_empty():
 		return false
-	if wave == SPAWNS.size():
+	journey.xp += 6
+	if wave == spawns.size():
 		phase = Phase.VICTORY
 		message = "The caravan lives to see dawn."
 	else:
@@ -181,7 +251,7 @@ func enemy_path(enemy: Enemy) -> Array[Vector2i]:
 			var next := tile + step
 			if previous.has(next) or not on_board(next) or next == FIRE or next == ranger:
 				continue
-			if next in ROCKS or enemy_at(next) != null:
+			if next in rocks or enemy_at(next) != null:
 				continue
 			previous[next] = tile
 			frontier.append(next)
@@ -190,6 +260,9 @@ func enemy_path(enemy: Enemy) -> Array[Vector2i]:
 		path.push_front(closest)
 		closest = previous[closest]
 	return path
+
+func enemy_movement(enemy: Enemy) -> int:
+	return 1 if enemy.pinned else ENEMY_MOVE
 
 func step_enemy(enemy: Enemy, tile: Vector2i) -> bool:
 	if is_wall(tile):
@@ -207,8 +280,12 @@ func step_enemy(enemy: Enemy, tile: Vector2i) -> bool:
 
 func attack_enemy_target(enemy: Enemy) -> Vector2i:
 	if distance(enemy.tile, ranger) <= ENEMY_RANGE:
-		ranger_hp = maxi(0, ranger_hp - 1)
-		message = "A creature hit the Ranger."
+		if braced:
+			braced = false
+			message = "Brace absorbed the hit."
+		else:
+			ranger_hp = maxi(0, ranger_hp - 1)
+			message = "A creature hit the Ranger."
 		return ranger
 	if distance(enemy.tile, FIRE) <= ENEMY_RANGE:
 		fire_hp = maxi(0, fire_hp - 2)
