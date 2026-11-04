@@ -7,7 +7,7 @@ A top-down, turn-based caravan defense game for solo play or cooperative parties
 Open the repository’s `project.godot` in Godot 4 and press **F5**. This single-player build follows the caravan from Pine Hollow to Stoneford.
 
 - Click a portrait in **Party**, click a living hero on the map, or press **1**, **2**, or **3** to switch heroes and inspect their equipment. Click highlighted tiles to move. Scroll to zoom, drag the field to pan, and press **F11** to toggle fullscreen. Each hero starts with 3 movement tiles per turn, which can be split before, between, or after attacks.
-- Click a creature within the selected hero’s weapon range to attack. Bows have a minimum range of 2 tiles. The Ranger starts with 3 action points and can shoot twice per turn. Each shot spends 1 action point and 1 bow attack.
+- Click a creature within the selected hero’s weapon range to attack. Attacks, Heal, and Revive work across edges or corners. Two blocking tiles seal a diagonal corner. Bows can fire at adjacent targets. The Ranger starts with 3 action points and can shoot twice per turn. Each shot spends 1 action point and 1 bow attack.
 - **Ranger — Overwatch:** Spend 1 action point and one bow attack to fire once when a creature moves within bow range during the enemy phase.
 - **Knight — Defend:** The equipped shield and armor passively reduce melee damage. Spend 1 action point on Defend to reduce the next melee hit by an additional point, plus any Shield Drill ranks. The Knight starts with 18 HP, 3 movement, 3 AP, and one adjacent sword strike per turn.
 - **Priest — Heal and Revival:** Starts with 14 HP, 3 movement, 3 AP, a Travel Coat, and one adjacent Pilgrim Mace strike per turn. Spend 1 AP to restore 3 HP to yourself or an adjacent living ally. Merciful Light adds 1 HP per rank, up to rank III.
@@ -24,9 +24,9 @@ Open the repository’s `project.godot` in Godot 4 and press **F5**. This single
 
 | Weapon | Range (tiles) | Damage |
 | --- | ---: | ---: |
-| Hunting Bow | 2–5 | 2 |
-| War Bow | 2–6 | 3 |
-| Longbow | 2–7 | 2 |
+| Hunting Bow | 1–5 | 2 |
+| War Bow | 1–6 | 3 |
+| Longbow | 1–7 | 2 |
 | Short Sword | 1 | 5 |
 | Iron Sword | 1 | 6 |
 | Pilgrim Mace | 1 | 3 |

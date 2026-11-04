@@ -158,7 +158,7 @@ func attack_range(hero: Hero) -> int:
 	return hero.character.max_range()
 
 func in_weapon_range(hero: Hero, tile: Vector2i) -> bool:
-	var gap := distance(hero.tile, tile)
+	var gap := combat_distance(hero.tile, tile)
 	return gap >= int(hero.character.weapon().min) and gap <= attack_range(hero) and has_sight(hero.tile, tile)
 
 func attack_damage(hero: Hero) -> int:
@@ -172,6 +172,10 @@ func hero_at(tile: Vector2i) -> Hero:
 
 func distance(a: Vector2i, b: Vector2i) -> int:
 	return absi(a.x - b.x) + absi(a.y - b.y)
+
+func combat_distance(a: Vector2i, b: Vector2i) -> int:
+	var delta := (a - b).abs()
+	return maxi(delta.x, delta.y) if delta.x <= 1 and delta.y <= 1 else delta.x + delta.y
 
 func is_lit(tile: Vector2i) -> bool:
 	return fire_hp > 0 and FIRE.distance_squared_to(tile) <= LIGHT_RADIUS * LIGHT_RADIUS
@@ -314,7 +318,7 @@ func revive_cost(hero: Hero) -> int:
 
 func can_revive(hero: Hero, target: Hero) -> bool:
 	return phase == Phase.PLAYER and hero.hp > 0 and target != null and target.hp == 0 \
-		and distance(hero.tile, target.tile) == 1 and hero.ap >= revive_cost(hero) \
+		and combat_distance(hero.tile, target.tile) == 1 and has_sight(hero.tile, target.tile) and hero.ap >= revive_cost(hero) \
 		and hero_at(target.tile) == null and enemy_at(target.tile) == null and not is_structure(target.tile)
 
 func revive(hero: Hero, target: Hero) -> bool:
@@ -334,7 +338,7 @@ func heal_power() -> int:
 
 func can_heal(target: Hero) -> bool:
 	return phase == Phase.PLAYER and priest.hp > 0 and priest.ap > 0 and target != null \
-		and target.hp > 0 and target.hp < max_health(target) and distance(priest.tile, target.tile) <= 1
+		and target.hp > 0 and target.hp < max_health(target) and combat_distance(priest.tile, target.tile) <= 1 and has_sight(priest.tile, target.tile)
 
 func heal(target: Hero) -> bool:
 	if not can_heal(target):
@@ -466,7 +470,7 @@ func footprint_at(origin: Vector2i, size: int) -> Array[Vector2i]:
 
 func footprint_distance(origin: Vector2i, size: int, target: Vector2i) -> int:
 	var nearest := target.clamp(origin, origin + Vector2i.ONE * (size - 1))
-	return distance(nearest, target)
+	return combat_distance(nearest, target)
 
 func sight_blocked(tile: Vector2i) -> bool:
 	return is_terrain_blocked(tile) or is_structure(tile)
@@ -532,7 +536,7 @@ func search_path(enemy: Enemy, goal: Vector2i, allow_structures: bool) -> Array[
 	while index < frontier.size():
 		var tile := frontier[index]
 		index += 1
-		if footprint_distance(tile, enemy.size, goal) == 1:
+		if can_reach_melee(tile, enemy.size, goal):
 			var path: Array[Vector2i] = []
 			while tile != enemy.tile:
 				path.push_front(tile)
@@ -574,12 +578,16 @@ func step_enemy(enemy: Enemy, tile: Vector2i) -> bool:
 				return false
 	return true
 
+func can_reach_melee(origin: Vector2i, size: int, target: Vector2i) -> bool:
+	var nearest := target.clamp(origin, origin + Vector2i.ONE * (size - 1))
+	return combat_distance(nearest, target) == 1 and has_sight(nearest, target)
+
 func enemy_target(enemy: Enemy, from: Vector2i) -> Vector2i:
 	# The Knight intercepts when multiple heroes are adjacent.
 	for hero: Hero in [knight, ranger, priest]:
-		if hero.hp > 0 and footprint_distance(from, enemy.size, hero.tile) == 1:
+		if hero.hp > 0 and can_reach_melee(from, enemy.size, hero.tile):
 			return hero.tile
-	return FIRE if footprint_distance(from, enemy.size, FIRE) == 1 else NO_TILE
+	return FIRE if can_reach_melee(from, enemy.size, FIRE) else NO_TILE
 
 func attack_enemy_target(enemy: Enemy, target: Vector2i) -> void:
 	var hero := hero_at(target)

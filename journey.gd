@@ -3,9 +3,9 @@ extends RefCounted
 const CAMPS := ["Pine Hollow", "Stoneford"]
 const GEAR := {
 	"pilgrim_mace": {"name": "Pilgrim Mace", "slot": "mace", "min": 1, "max": 1, "damage": 3, "price": 0},
-	"hunting_bow": {"name": "Hunting Bow", "slot": "bow", "min": 2, "max": 5, "damage": 2, "price": 0},
-	"war_bow": {"name": "War Bow", "slot": "bow", "min": 2, "max": 6, "damage": 3, "price": 8},
-	"longbow": {"name": "Longbow", "slot": "bow", "min": 2, "max": 7, "damage": 2, "price": 7},
+	"hunting_bow": {"name": "Hunting Bow", "slot": "bow", "min": 1, "max": 5, "damage": 2, "price": 0},
+	"war_bow": {"name": "War Bow", "slot": "bow", "min": 1, "max": 6, "damage": 3, "price": 8},
+	"longbow": {"name": "Longbow", "slot": "bow", "min": 1, "max": 7, "damage": 2, "price": 7},
 	"travel_coat": {"name": "Travel Coat", "slot": "armor", "health": 0, "price": 0},
 	"quilted_coat": {"name": "Quilted Coat", "slot": "armor", "health": 2, "price": 3},
 	"short_sword": {"name": "Short Sword", "slot": "sword", "min": 1, "max": 1, "damage": 5, "price": 0},

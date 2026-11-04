@@ -12,6 +12,18 @@ const CELL := 58
 const BOARD := Vector2.ZERO
 const VIEW := Vector2(1280, 720)
 const SPRITES := {
+	"fire_0": preload("res://art/heavy_ink/fire_0.png"),
+	"fire_1": preload("res://art/heavy_ink/fire_1.png"),
+	"fire_2": preload("res://art/heavy_ink/fire_2.png"),
+	"loot_bag": preload("res://art/heavy_ink/loot_bag.png"),
+	"priest_cast_low": preload("res://art/heavy_ink/priest_cast_low.png"),
+	"priest_cast_high": preload("res://art/heavy_ink/priest_cast_high.png"),
+	"knight_guard": preload("res://art/heavy_ink/knight_guard.png"),
+	"ranger_watch": preload("res://art/heavy_ink/ranger_watch.png"),
+	"stake_1": preload("res://art/heavy_ink/stake_1.png"),
+	"stake_2": preload("res://art/heavy_ink/stake_2.png"),
+	"stake_3": preload("res://art/heavy_ink/stake_3.png"),
+	"stake_4": preload("res://art/heavy_ink/stake_4.png"),
 	"husk": preload("res://art/heavy_ink/husk.png"),
 	"skitter": preload("res://art/heavy_ink/skitter.png"),
 	"brute": preload("res://art/heavy_ink/brute.png"),
@@ -32,6 +44,7 @@ const SPRITES := {
 	"ballista_2": preload("res://art/heavy_ink/ballista_2.png"),
 	"ballista_3": preload("res://art/heavy_ink/ballista_3.png"),
 }
+const HEAL_ICON := preload("res://art/heavy_ink/heal.svg")
 const HUD := Color(0.071, 0.107, 0.13, 0.88)
 const INK := Color("#101923")
 const PAPER := Color("#ece0c1")
@@ -68,6 +81,9 @@ var dawn_loot: Array[String] = []
 var day_message := ""
 var pin_selected := false
 var heal_selected := false
+var ready_at: Dictionary = {}
+var shield_impact_until := 0.0
+var heal_cast_until := 0.0
 var blessing_tile := Night.NO_TILE
 var blessing_until := 0.0
 var intent_tile := Vector2i(-1, -1)
@@ -136,7 +152,10 @@ func _ready() -> void:
 	make_button("revive", "", Vector2(1099, 470), 164, revive_nearby)
 	make_button("pin", "Pinning Shot", Vector2(1099, 470), 164, toggle_pin)
 	for i in 3:
-		make_button("upgrade%d" % i, "", Vector2(935, 350 + 56 * i), 328, choose_upgrade.bind(i))
+		make_button("upgrade%d" % i, "", Vector2(932, 341 + 62 * i), 318, choose_upgrade.bind(i))
+		var choice: Button = buttons["upgrade%d" % i]
+		choice.size.y = 54
+		choice.add_theme_font_size_override("font_size", 15)
 	for i in 8:
 		make_button("equip%d" % i, "Equip", Vector2(475, 200 + 45 * i), 95, equip.bind(i))
 		make_button("sell%d" % i, "Sell", Vector2(580, 200 + 45 * i), 115, sell.bind(i))
@@ -155,6 +174,16 @@ func make_button(key: String, label: String, position_at: Vector2, width: int, a
 	button.size = Vector2(width, 44)
 	button.add_theme_font_size_override("font_size", 17)
 	button.focus_mode = Control.FOCUS_NONE
+	for state in ["normal", "hover", "pressed", "disabled"]:
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color("#28242a") if state == "normal" else Color("#3d3030")
+		style.border_color = Color("#8b684a") if state == "normal" else GOLD
+		if state == "disabled":
+			style.bg_color = Color("#211e21")
+			style.border_color = Color("#4e4140")
+		style.set_border_width_all(1)
+		style.border_width_bottom = 3
+		button.add_theme_stylebox_override(state, style)
 	button.pressed.connect(action)
 	add_child(button)
 	buttons[key] = button
@@ -203,6 +232,9 @@ func begin_night(supplies: int = 0) -> void:
 	hit_until = 0.0
 	fallen_defenses.clear()
 	blessing_until = 0.0
+	heal_cast_until = 0.0
+	shield_impact_until = 0.0
+	ready_at.clear()
 	heal_selected = false
 	firing_tile = Night.NO_TILE
 	damaged_tile = Night.NO_TILE
@@ -281,8 +313,9 @@ func refresh() -> void:
 	buttons.revive.visible = night.phase == Night.Phase.PLAYER and adjacent_fallen() != null
 	buttons.revive.disabled = busy or not night.can_revive(active, adjacent_fallen())
 	buttons.revive.text = "Revive [%d AP]" % night.revive_cost(active)
+	buttons.special.icon = HEAL_ICON if active == night.priest else null
 	if active == night.priest:
-		buttons.special.text = "Select heal target" if heal_selected else "Heal [1 AP]"
+		buttons.special.text = "Choose Ally" if heal_selected else "Heal [1 AP]"
 		buttons.special.tooltip_text = "Restore up to %d HP to yourself or an adjacent living ally." % night.heal_power()
 		buttons.special.disabled = busy or active.ap <= 0 or active.hp <= 0
 	elif active == night.ranger:
@@ -418,6 +451,7 @@ func prepare_special() -> void:
 		heal_selected = not heal_selected
 		refresh()
 	elif night.prepare(active):
+		ready_at[active] = clock
 		refresh()
 
 func adjacent_fallen() -> Night.Hero:
@@ -425,7 +459,7 @@ func adjacent_fallen() -> Night.Hero:
 	for hero: Night.Hero in night.heroes:
 		if night.can_revive(active, hero):
 			return hero
-		if hero.hp == 0 and night.distance(active.tile, hero.tile) == 1:
+		if hero.hp == 0 and night.combat_distance(active.tile, hero.tile) == 1:
 			fallback = hero
 	return fallback
 
@@ -618,6 +652,7 @@ func play_at(tile: Vector2i) -> void:
 	var ally := night.hero_at(tile)
 	if heal_selected and active == night.priest:
 		if night.heal(ally):
+			heal_cast_until = clock + 0.62
 			bless(tile)
 			heal_selected = false
 		else:
@@ -744,6 +779,8 @@ func enemy_strike(enemy: Night.Enemy, target: Vector2i) -> void:
 	flash(center(target))
 	var structure: Dictionary = night.defenses.get(target, {}).duplicate()
 	damaged_tile = target
+	if night.hero_at(target) == night.knight and night.knight.prepared:
+		shield_impact_until = clock + 0.23
 	night.attack_enemy_target(enemy, target)
 	if not structure.is_empty() and not night.defenses.has(target):
 		fallen_defenses[target] = structure.kind
@@ -826,17 +863,26 @@ func _draw() -> void:
 		draw_board()
 		draw_effects()
 		draw_set_transform(Vector2.ZERO)
-		draw_rect(Rect2(0, 0, 1280, 42), HUD)
+		draw_top_bar()
 		draw_rect(Rect2(0, 686, 908, 34), HUD)
-		label_at(Vector2(20, 27), "%s   /   NIGHT %d   •   WAVE %d/%d   •   TURN %02d" % [
-			Journey.CAMPS[journey.site], journey.site + 1, night.wave, night.spawns.size(), night.turn], 16, GOLD)
-		label_at(Vector2(924, 27), "FIRE %d/%d   •   SUPPLIES %d" % [night.fire_hp, Night.MAX_FIRE_HP, night.supplies], 17, GOLD)
 		draw_hover_tip()
 		draw_sidebar()
 		if night.is_structure(inspected_defense) and menu == Menu.CLOSED:
 			draw_defense_popup()
 	if menu != Menu.CLOSED:
 		draw_game_menu()
+
+func draw_top_bar() -> void:
+	draw_rect(Rect2(0, 0, 1280, 43), Color("#19171c"))
+	draw_line(Vector2(0, 42), Vector2(1280, 42), Color("#75533c"), 2)
+	draw_hud_frame(Rect2(12, 5, 292, 32), Color("#2e2425"))
+	label_at(Vector2(23, 27), Journey.CAMPS[journey.site].to_upper(), 18, GOLD)
+	var labels := ["NIGHT %d" % (journey.site + 1), "WAVE %d/%d" % [night.wave, night.spawns.size()],
+		"TURN %02d" % night.turn, "FIRE %d/%d" % [night.fire_hp, Night.MAX_FIRE_HP], "SUPPLIES %d" % night.supplies]
+	for i in labels.size():
+		var x := 316 + i * 126 if i < 3 else 887 + (i - 3) * 126
+		draw_hud_frame(Rect2(x, 5, 118, 32), Color("#292328"))
+		label_at(Vector2(x + 10, 26), labels[i], 15, PAPER if i < 3 else GOLD)
 
 func draw_hover_tip() -> void:
 	if night.phase != Night.Phase.PLAYER or busy or menu != Menu.CLOSED:
@@ -846,7 +892,7 @@ func draw_hover_tip() -> void:
 	if enemy == null:
 		return
 	var stats: Array = Night.CREATURES[enemy.kind]
-	var gap := night.distance(active.tile, tile)
+	var gap := night.combat_distance(active.tile, tile)
 	var valid := night.in_weapon_range(active, tile)
 	var reason := "Clear shot"
 	if gap < int(active.character.weapon().min):
@@ -913,11 +959,7 @@ func draw_board() -> void:
 		for x in Night.SIZE.x:
 			draw_tile_overlay(Vector2i(x, y), hovered, inspected_range)
 	for tile: Vector2i in night.loot:
-		var at := center(tile) + Vector2(13, -13)
-		polygon(at, [Vector2(-3, -5), Vector2(3, -5), Vector2(6, 1), Vector2(5, 6),
-			Vector2(-5, 6), Vector2(-6, 1)], Color("#d5a15e"))
-		draw_line(at + Vector2(-4, -2), at + Vector2(4, -2), Color("#483325"), 2, true)
-		draw_line(at + Vector2(-2, -6), at + Vector2(2, -6), GOLD, 2, true)
+		draw_sprite("loot_bag", center(tile) + Vector2(11, 7), 26.0)
 	for tile: Vector2i in fallen_defenses:
 		if not night.defenses.has(tile):
 			draw_rubble(center(tile), fallen_defenses[tile] == "Ballista")
@@ -995,29 +1037,18 @@ func silhouette(texture: Texture2D) -> Texture2D:
 	return outlines[texture]
 
 func draw_fire(at: Vector2) -> void:
-	draw_sprite("embers", at + Vector2(0, 4), 45.0)
 	if night.fire_hp == 0:
+		draw_sprite("embers", at + Vector2(0, 4), 45.0)
 		return
 	var pulse := sin(clock * 13.0) * 2.0
 	for i in range(3, 0, -1):
 		draw_circle(at, 10.0 + i * 7.0 + pulse, Color(1.0, 0.57, 0.23, 0.045))
-	for i in 3:
-		var root := at + Vector2(i * 7 - 7, 3 - i % 2 * 3)
-		var phase := clock * (11.0 + i) + i * 2.3
-		var lean := sin(phase) * 5.0
-		var height := 21.0 + i % 2 * 10.0 + sin(phase * 1.43) * 5.0
-		polygon(root, [Vector2(-7, 2), Vector2(-8, -6), Vector2(lean * 0.3 - 4, -height * 0.58),
-			Vector2(lean, -height), Vector2(lean + 3, -height * 0.68),
-			Vector2(8, -9), Vector2(6, 2)], Color("#2b1b17"))
-		polygon(root, [Vector2(-5, 1), Vector2(-6, -5), Vector2(lean * 0.3 - 2, -height * 0.54),
-			Vector2(lean, -height + 3), Vector2(lean + 2, -height * 0.63),
-			Vector2(6, -8), Vector2(5, 1)], Color("#ed7833"))
-		polygon(root, [Vector2(-4, 1), Vector2(-3, -7), Vector2(lean * 0.55, -height * 0.56),
-			Vector2(3, -7), Vector2(4, 1)], Color("#ffd486"))
+	var cycle := [0, 1, 2, 1]
+	draw_sprite("fire_%d" % cycle[int(clock * 9.0) % cycle.size()], at + Vector2(0, -4), 53.0)
 	for i in 5:
 		var rise := fposmod(clock * 24.0 + i * 9.0, 40.0)
-		draw_circle(at + Vector2(sin(rise * 0.18 + i) * 9, -9 - rise), 1.4,
-			Color(1.0, 0.75, 0.4, 1.0 - rise / 41.0))
+		var ember := at + Vector2(sin(rise * 0.18 + i) * 9, -9 - rise)
+		draw_rect(Rect2(ember, Vector2(2, 2)), Color(1.0, 0.75, 0.4, 1.0 - rise / 41.0))
 
 func draw_fallen(hero: Night.Hero) -> void:
 	var at := center(hero.tile)
@@ -1052,6 +1083,15 @@ func draw_unit(key: String, at: Vector2, side: float, actor: Variant, hit: bool,
 	var texture: Texture2D = SPRITES[key]
 	if pose >= 0 and animation_frames[key][pose] != null:
 		texture = animation_frames[key][pose]
+	if pose < 0 and actor is Night.Hero and actor.prepared:
+		var age := clock - float(ready_at.get(actor, clock - 1.0))
+		if age >= 0.08:
+			texture = SPRITES["knight_guard" if key == "knight" else "ranger_watch"]
+		offset.y -= sin(clampf(age / 0.22, 0.0, 1.0) * PI) * 3.0
+	if key == "knight" and shield_impact_until > clock and hit:
+		texture = SPRITES["knight_guard"]
+	if key == "priest" and heal_cast_until > clock:
+		texture = SPRITES["priest_cast_high" if heal_cast_until - clock < 0.44 else "priest_cast_low"]
 	var rect := sprite_rect(texture, at + offset, side)
 	if actor == active and not dead:
 		var mask := silhouette(texture)
@@ -1132,17 +1172,10 @@ func draw_linked_wall(tile: Vector2i, at: Vector2, level: int, hp: float, impact
 		draw_rubble(at + Vector2(1, 13), false)
 
 func draw_wall_stake(at: Vector2, level: int, broken: bool, impact: float) -> void:
-	var tip := -14.0 if not broken else -5.0
-	var wood := Color("#a57652").lerp(Color("#e3977e"), impact)
-	polygon(at, [Vector2(-5, 5), Vector2(-5, tip + 4), Vector2(0, tip),
-		Vector2(5, tip + 4), Vector2(5, 4)], Color("#211815"))
-	polygon(at, [Vector2(-3, 3), Vector2(-3, tip + 5), Vector2(0, tip + 2),
-		Vector2(3, tip + 5), Vector2(3, 2)], wood)
-	draw_line(at + Vector2(1, tip + 5), at + Vector2(2, 2), Color("#593d32"), 1.6)
-	if level >= 2:
-		draw_line(at + Vector2(-4, -1), at + Vector2(4, -1), Color("#969697"), 2)
-	if level >= 3:
-		draw_circle(at + Vector2(0, -1), 1.6, GOLD)
+	var key := "stake_4" if broken else "stake_%d" % level
+	draw_sprite(key, at + Vector2(0, -7 if not broken else -2), 27.0 if not broken else 18.0,
+		Color.WHITE.lerp(Color("#f7a68b"), impact))
+
 
 func weapon_range(hero: Night.Hero) -> String:
 	var minimum: int = hero.character.weapon().min
@@ -1177,6 +1210,23 @@ func draw_gear_icon(slot: String, at: Vector2) -> void:
 			else:
 				draw_line(at + Vector2(-7, 1), at + Vector2(-1, 6), GOLD, 2)
 
+func health_color(ratio: float) -> Color:
+	if ratio <= 0.0:
+		return Color("#100e12")
+	if ratio <= 0.30:
+		return Color("#d65b54")
+	if ratio <= 0.65:
+		return Color("#e4ba55")
+	return Color("#78bf78")
+
+func draw_counter(at: Vector2, value: int, color: Color, caption: String) -> void:
+	draw_circle(at, 10, color.darkened(0.66), true, -1, true)
+	draw_arc(at, 10, 0, TAU, 20, color, 1.4, true)
+	var digits := str(value)
+	var width := ThemeDB.fallback_font.get_string_size(digits, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+	label_at(at + Vector2(-width * 0.5, 5), digits, 14)
+	label_at(at + Vector2(15, 5), caption, 13, color)
+
 func draw_party() -> void:
 	draw_hud_frame(Rect2(918, 52, 345, 470), HUD)
 	label_at(Vector2(931, 67), "PARTY", 15, GOLD)
@@ -1189,12 +1239,15 @@ func draw_party() -> void:
 		var hp_ratio := float(hp) / night.max_health(hero)
 		label_at(row.position + Vector2(64, 22), "%d  %s   Lv. %d" % [i + 1, hero.title, hero.character.level], 17)
 		label_at(row.position + Vector2(233, 22), "%d/%d HP" % [hp, night.max_health(hero)], 14, PAPER)
-		draw_rect(Rect2(row.position + Vector2(64, 30), Vector2(249, 3)), Color("#101923"))
-		draw_rect(Rect2(row.position + Vector2(64, 30), Vector2(249 * hp_ratio, 3)), TEAL if hp_ratio > 0.35 else RED)
+		draw_rect(Rect2(row.position + Vector2(64, 30), Vector2(249, 4)), Color("#100e12"))
+		draw_rect(Rect2(row.position + Vector2(64, 30), Vector2(249 * hp_ratio, 4)), health_color(hp_ratio))
 		var move := hero.movement if day == Day.NIGHT else night.movement_limit(hero)
 		var ap := hero.ap if day == Day.NIGHT else Night.MAX_AP
-		var status := "Move %d   •   AP %d" % [move, ap] if hp > 0 else "Downed"
-		label_at(row.position + Vector2(64, 51), status, 15, MUTED)
+		if hp > 0:
+			draw_counter(row.position + Vector2(75, 46), move, Color("#76b8e8"), "MOVE")
+			draw_counter(row.position + Vector2(158, 46), ap, Color("#eda65f"), "AP")
+		else:
+			label_at(row.position + Vector2(64, 51), "Downed", 15, MUTED)
 		if hero.prepared and day == Day.NIGHT:
 			label_at(row.position + Vector2(229, 51), "Ready", 14, GOLD)
 
@@ -1218,7 +1271,9 @@ func draw_loadout() -> void:
 func draw_sidebar() -> void:
 	draw_party()
 	if not pending_upgrades().is_empty():
-		label_at(Vector2(931, 323), "%s LEVEL UP   /   CHOOSE ONE" % active.title.to_upper(), 18, GOLD)
+		draw_hud_frame(Rect2(922, 284, 338, 250), Color("#201a23"))
+		label_at(Vector2(938, 307), "LEVEL UP   /   %s" % active.title.to_upper(), 19, GOLD)
+		label_at(Vector2(938, 328), "Choose one upgrade", 15, MUTED)
 	else:
 		draw_loadout()
 		match night.phase:
