@@ -2,6 +2,8 @@ extends Node2D
 
 const Night := preload("res://night.gd")
 const Journey := preload("res://journey.gd")
+const BoardArt := preload("res://board_art.gd")
+const TERRAIN := [preload("res://art/pine.svg"), preload("res://art/stoneford.svg")]
 enum Day { NIGHT, DAWN, MERCHANT, DUSK, COMPLETE }
 const CELL := 46
 const BOARD := Vector2(32, 135)
@@ -14,6 +16,8 @@ const RED := Color("#f18878")
 
 var journey := Journey.new()
 var night := Night.new(journey)
+var active: Night.Hero
+var night_shade: ImageTexture
 var day := Day.NIGHT
 var dawn_loot: Array[String] = []
 var day_message := ""
@@ -38,12 +42,15 @@ var hit_position := Vector2.ZERO
 var hit_until := 0.0
 
 func _ready() -> void:
+	night_shade = BoardArt.new().make_night_shade(Night.SIZE, Night.FIRE, CELL, Night.LIGHT_RADIUS)
 	make_button("Wall", "Wall  [2]", Vector2(760, 470), 98, choose_build.bind("Wall"))
 	make_button("Trap", "Trap  [1]", Vector2(868, 470), 98, choose_build.bind("Trap"))
 	make_button("Ballista", "Ballista  [3]", Vector2(976, 470), 112, choose_build.bind("Ballista"))
 	make_button("advance", "End Turn", Vector2(760, 531), 328, advance)
 	make_button("restart", "Restart Journey", Vector2(760, 589), 328, restart)
-	make_button("brace", "Brace  [1 AP]", Vector2(760, 470), 152, brace)
+	make_button("ranger", "1  Ranger", Vector2(760, 320), 156, select_hero.bind(0))
+	make_button("knight", "2  Knight", Vector2(932, 320), 156, select_hero.bind(1))
+	make_button("special", "", Vector2(760, 470), 152, prepare_special)
 	make_button("pin", "Pinning Shot", Vector2(924, 470), 164, toggle_pin)
 	for i in 3:
 		make_button("upgrade%d" % i, "", Vector2(760, 350 + 56 * i), 328, choose_upgrade.bind(i))
@@ -72,6 +79,7 @@ func restart() -> void:
 
 func begin_night() -> void:
 	night = Night.new(journey)
+	active = night.ranger
 	selected_build = "Wall"
 	pin_selected = false
 	hit_until = 0.0
@@ -84,7 +92,13 @@ func pending_upgrades() -> Array[String]:
 	return []
 
 func refresh() -> void:
-	reach = night.ranger_reach()
+	if active.hp <= 0:
+		for hero: Night.Hero in night.heroes:
+			if hero.hp > 0:
+				active = hero
+				pin_selected = false
+				break
+	reach = night.reach_for(active)
 	update_intent(tile_at(get_local_mouse_position()))
 	for button: Button in buttons.values():
 		button.hide()
@@ -102,7 +116,7 @@ func refresh() -> void:
 		for i in upgrades.size():
 			var info: Array = Journey.UPGRADES[upgrades[i]]
 			var button: Button = buttons["upgrade%d" % i]
-			button.text = "%s\n%s" % [info[0], info[1]]
+			button.text = "%s\n%s" % [journey.upgrade_name(upgrades[i], journey.rank_of(upgrades[i]) + 1), info[1]]
 			button.show()
 		return
 
@@ -112,10 +126,21 @@ func refresh() -> void:
 		button.visible = building
 		button.disabled = night.supplies < Night.BUILD_COST[kind]
 		button.modulate = GOLD if kind == selected_build else Color.WHITE
-	buttons.brace.visible = night.phase == Night.Phase.PLAYER
-	buttons.brace.disabled = busy or night.ap == 0 or night.braced
-	buttons.pin.visible = night.phase == Night.Phase.PLAYER and journey.has_pin
-	buttons.pin.disabled = busy or night.ap == 0 or night.attacks == 0
+	for hero: Night.Hero in night.heroes:
+		var button: Button = buttons[hero.title.to_lower()]
+		button.visible = not building and night.phase in [Night.Phase.PLAYER, Night.Phase.ENEMY]
+		button.disabled = busy or hero.hp <= 0
+		button.modulate = TEAL if hero == active else Color.WHITE
+	buttons.special.visible = night.phase == Night.Phase.PLAYER
+	buttons.special.disabled = busy or not night.can_prepare(active)
+	if active == night.ranger:
+		buttons.special.text = "Overwatch Ready" if active.prepared else "Overwatch [1 AP]"
+		buttons.special.tooltip_text = "Spend 1 AP and one bow attack. Fire once at a creature that moves within bow range this enemy phase."
+	else:
+		buttons.special.text = "Defend Ready" if active.prepared else "Defend [1 AP]"
+		buttons.special.tooltip_text = "Spend 1 AP to block the next melee hit against the Knight this round."
+	buttons.pin.visible = night.phase == Night.Phase.PLAYER and active == night.ranger and journey.rank_of("pin") > 0
+	buttons.pin.disabled = busy or active.ap == 0 or active.attacks == 0
 	buttons.pin.modulate = GOLD if pin_selected else Color.WHITE
 	if building:
 		buttons.advance.text = "Start Next Wave"
@@ -150,14 +175,27 @@ func choose_upgrade(index: int) -> void:
 	var choices := pending_upgrades()
 	if index >= choices.size():
 		return
-	var previous_health := journey.max_health()
-	if journey.upgrade(choices[index]):
-		night.ranger_hp += journey.max_health() - previous_health
-		night.message = "Learned %s." % Journey.UPGRADES[choices[index]][0]
+	var ranger_health := night.max_health(night.ranger)
+	var knight_health := night.max_health(night.knight)
+	var id := choices[index]
+	if journey.upgrade(id):
+		if night.ranger.hp > 0:
+			night.ranger.hp += night.max_health(night.ranger) - ranger_health
+		if night.knight.hp > 0:
+			night.knight.hp += night.max_health(night.knight) - knight_health
+		night.message = "Learned %s." % journey.upgrade_name(id, journey.rank_of(id))
 	refresh()
 
-func brace() -> void:
-	if not busy and night.brace():
+func select_hero(index: int) -> void:
+	var hero := night.heroes[index]
+	if busy or night.phase != Night.Phase.PLAYER or hero.hp <= 0 or active == hero:
+		return
+	active = hero
+	pin_selected = false
+	refresh()
+
+func prepare_special() -> void:
+	if not busy and night.prepare(active):
 		refresh()
 
 func toggle_pin() -> void:
@@ -233,16 +271,19 @@ func update_intent(tile: Vector2i) -> void:
 		if night.defenses.has(step) and night.defenses[step].kind == "Trap" and enemy.hp <= 3:
 			return
 		destination = step
-	if night.distance(destination, night.ranger) <= Night.ENEMY_RANGE:
-		intent_target = night.ranger
-	elif night.distance(destination, Night.FIRE) <= Night.ENEMY_RANGE:
-		intent_target = Night.FIRE
+	intent_target = night.enemy_target(destination)
 
 func _input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and event.keycode == KEY_SPACE:
-		get_viewport().set_input_as_handled()
-		if not event.echo:
+	if not (event is InputEventKey and event.pressed and not event.echo):
+		return
+	match event.keycode:
+		KEY_SPACE:
+			get_viewport().set_input_as_handled()
 			advance()
+		KEY_1, KEY_2:
+			if day == Day.NIGHT and night.phase == Night.Phase.PLAYER:
+				get_viewport().set_input_as_handled()
+				select_hero(0 if event.keycode == KEY_1 else 1)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if busy or day != Day.NIGHT or not pending_upgrades().is_empty():
@@ -261,26 +302,34 @@ func _unhandled_input(event: InputEvent) -> void:
 			play_at(tile)
 
 func play_at(tile: Vector2i) -> void:
+	var ally := night.hero_at(tile)
+	if ally != null:
+		select_hero(night.heroes.find(ally))
+		return
 	var enemy := night.enemy_at(tile)
 	if enemy != null:
-		if not night.can_shoot(tile, pin_selected):
-			night.message = "A shot needs 1 AP, a bow attack, and a target within %d tiles." % journey.bow_range()
+		if not night.can_attack(active, tile, pin_selected):
+			night.message = "Attack needs 1 AP, an attack remaining, and a target within %d tiles." % night.attack_range(active)
 			return
 		busy = true
 		refresh()
-		await projectile(center(night.ranger), center(tile), GOLD)
-		night.shoot(tile, pin_selected)
+		if active == night.ranger:
+			await projectile(center(active.tile), center(tile), GOLD)
+		else:
+			flash(center(tile))
+			await get_tree().create_timer(0.13).timeout
+		night.attack(active, tile, pin_selected)
 		pin_selected = false
-	elif tile != night.ranger:
-		var old := night.ranger
-		var path := night.move_ranger(tile)
+	else:
+		var old := active.tile
+		var path := night.move_hero(active, tile)
 		if path.is_empty():
-			night.message = "Choose a teal tile within your remaining movement."
+			night.message = "Choose a highlighted tile within your remaining movement."
 			return
 		busy = true
 		refresh()
 		for step: Vector2i in path:
-			await move_piece("ranger", old, step, 0.12)
+			await move_piece(active, old, step, 0.12)
 			old = step
 	busy = false
 	refresh()
@@ -328,6 +377,12 @@ func advance() -> void:
 					flash(center(next))
 					stopped = true
 					break
+				if night.can_overwatch(enemy):
+					await projectile(center(night.ranger.tile), center(enemy.tile), TEAL)
+					night.fire_overwatch(enemy)
+					if not night.enemies.has(enemy):
+						stopped = true
+						break
 			if not stopped:
 				var target := night.attack_enemy_target(enemy)
 				if night.on_board(target):
@@ -398,42 +453,62 @@ func _draw() -> void:
 
 func draw_board() -> void:
 	var hovered := tile_at(get_local_mouse_position())
+	var board_rect := Rect2(BOARD, Vector2(Night.SIZE) * CELL)
+	draw_rect(board_rect.grow(3), Color("#5d5141"), false, 2)
+	draw_texture_rect(TERRAIN[journey.site], board_rect, false)
+	for tile: Vector2i in night.rocks:
+		draw_rock(center(tile), posmod(tile.x * 5 + tile.y * 11, 6))
+	if night.fire_hp > 0:
+		draw_texture_rect(night_shade, board_rect, false)
+	else:
+		draw_rect(board_rect, Color(0.025, 0.044, 0.08, 0.76))
 	for y in Night.SIZE.y:
 		for x in Night.SIZE.x:
-			var tile := Vector2i(x, y)
-			draw_ground(tile, hovered)
+			draw_tile_overlay(Vector2i(x, y), hovered)
 	for tile: Vector2i in night.loot:
 		var at := center(tile) + Vector2(13, -13)
-		polygon(at, [Vector2(0, -5), Vector2(4, 0), Vector2(0, 5), Vector2(-4, 0)], GOLD)
+		polygon(at, [Vector2(-3, -5), Vector2(3, -5), Vector2(6, 1), Vector2(5, 6),
+			Vector2(-5, 6), Vector2(-6, 1)], Color("#d5a15e"))
+		draw_line(at + Vector2(-4, -2), at + Vector2(4, -2), Color("#483325"), 2, true)
+		draw_line(at + Vector2(-2, -6), at + Vector2(2, -6), GOLD, 2, true)
 	for tile: Vector2i in night.defenses:
 		draw_defense(center(tile), night.defenses[tile].kind)
 	draw_fire(center(Night.FIRE))
 	for enemy: Night.Enemy in night.enemies:
 		var at := motion_from.lerp(motion_to, motion_progress) if motion_actor is Night.Enemy and motion_actor == enemy else center(enemy.tile)
 		draw_enemy(at, enemy.hp)
-	var ranger_at := motion_from.lerp(motion_to, motion_progress) if motion_actor is String else center(night.ranger)
-	draw_ranger(ranger_at)
+	for hero: Night.Hero in night.heroes:
+		if hero.hp <= 0:
+			continue
+		var at := motion_from.lerp(motion_to, motion_progress) if motion_actor == hero else center(hero.tile)
+		if hero == night.ranger:
+			draw_ranger(at)
+		else:
+			draw_knight(at)
+		if hero == active:
+			draw_arc(at, 20, 0, TAU, 24, TEAL, 2, true)
+		if hero.prepared:
+			draw_circle(at + Vector2(15, -15), 4, GOLD)
 
-func draw_ground(tile: Vector2i, hovered: Vector2i) -> void:
-	var lit := night.is_lit(tile)
+func draw_rock(at: Vector2, variation: int) -> void:
+	var x := float(variation) - 2.0
+	draw_circle(at + Vector2(2, 4), 17, Color(0.10, 0.11, 0.10, 0.52))
+	polygon(at, [Vector2(-18, 8), Vector2(-14, -8), Vector2(-4, -15 - x),
+		Vector2(10, -12), Vector2(18, 3 + x), Vector2(12, 12), Vector2(-7, 14)], Color("#3f4946"))
+	polygon(at, [Vector2(-15, 2), Vector2(-11, -7), Vector2(-4, -15 - x),
+		Vector2(10, -12), Vector2(13, -2), Vector2(1, 4), Vector2(-7, -1)], Color("#929287"))
+	polygon(at, [Vector2(-15, 2), Vector2(-7, -1), Vector2(1, 4), Vector2(-1, 10),
+		Vector2(-11, 10)], Color("#6b715d"))
+	draw_polyline(PackedVector2Array([at + Vector2(-11, -7), at + Vector2(-3, -8 - x),
+		at + Vector2(2, -4), at + Vector2(7, -6)]), Color("#60695d"), 1.5, true)
+	draw_line(at + Vector2(-15, 1), at + Vector2(-11, -7), Color("#b2aa89"), 1, true)
+
+func draw_tile_overlay(tile: Vector2i, hovered: Vector2i) -> void:
 	var rect := tile_rect(tile)
-	var grain := posmod(tile.x * 31 + tile.y * 17, 11)
-	var shade := Color("#454137") if lit else Color("#172632")
-	if journey.site == 1:
-		shade = Color("#4b4642") if lit else Color("#232638")
-	draw_rect(rect, shade.lightened(grain * 0.005))
-	draw_rect(rect, Color("#766754") if lit else Color("#273947"), false, 1.0)
-	for mark in 3:
-		var offset := Vector2(5 + posmod(tile.x * 13 + mark * 12 + tile.y * 7, 35),
-			5 + posmod(tile.y * 13 + mark * 7 + tile.x * 9, 34))
-		draw_line(rect.position + offset, rect.position + offset + Vector2(3, -2),
-			Color("#817263") if lit else Color("#31424a"), 1.0)
-	if tile in night.rocks:
-		var at := center(tile)
-		polygon(at, [Vector2(-17, 11), Vector2(-14, -6), Vector2(-5, -14),
-			Vector2(10, -12), Vector2(17, 6), Vector2(10, 12)], Color("#566168"))
-		draw_line(at + Vector2(-12, 5), at + Vector2(-4, -9), Color("#849096"), 2)
-	if not busy and tile != night.ranger and reach.has(tile):
+	var grid_color := Color(0.94, 0.78, 0.54, 0.26) if night.is_lit(tile) else Color(0.64, 0.72, 0.79, 0.14)
+	draw_line(rect.position, rect.position + Vector2(CELL, 0), grid_color)
+	draw_line(rect.position, rect.position + Vector2(0, CELL), grid_color)
+	if not busy and tile != active.tile and reach.has(tile):
 		draw_rect(rect.grow(-2), Color(0.34, 0.86, 0.72, 0.16))
 		draw_rect(rect.grow(-3), Color(0.34, 0.86, 0.72, 0.45), false, 1.0)
 	if tile in intent_path:
@@ -442,6 +517,9 @@ func draw_ground(tile: Vector2i, hovered: Vector2i) -> void:
 		draw_rect(rect.grow(-4), RED, false, 3)
 	if tile == hovered:
 		draw_rect(rect.grow(-2), PAPER, false, 2.0)
+		var text_color := GOLD if night.is_lit(tile) else MUTED
+		var light_status := "FIRELIGHT" if night.is_lit(tile) else "DARKNESS"
+		label_at(Vector2(601, 123), light_status, 13, text_color)
 
 func polygon(at: Vector2, points: Array, color: Color) -> void:
 	var vertices := PackedVector2Array()
@@ -469,13 +547,23 @@ func draw_fire(at: Vector2) -> void:
 
 func draw_ranger(at: Vector2) -> void:
 	draw_circle(at, 18, Color("#122b29"))
-	draw_arc(at, 17, 0, TAU, 24, TEAL, 1.6, true)
+	draw_arc(at, 16, 0, TAU, 24, Color("#517e70"), 1.2, true)
 	var body := at + Vector2(0, sin(clock * 5.0) * 1.2)
 	polygon(body, [Vector2(-10, 11), Vector2(-7, -4), Vector2(-2, -11), Vector2(6, -7),
 		Vector2(10, 10), Vector2(0, 7)], Color("#4e9c80"))
 	draw_circle(body + Vector2(0, -6), 4, Color("#d7b592"))
 	draw_arc(body + Vector2(7, 2), 9, -1.0, 1.0, 12, GOLD, 2, true)
 	draw_line(body + Vector2(12, -5), body + Vector2(12, 9), PAPER, 1, true)
+
+func draw_knight(at: Vector2) -> void:
+	draw_circle(at, 17, Color("#292d3d"))
+	var body := at + Vector2(0, sin(clock * 4.0) * 1.1)
+	polygon(body, [Vector2(-11, 10), Vector2(-8, -6), Vector2(7, -6), Vector2(11, 10)], Color("#8093a5"))
+	draw_circle(body + Vector2(0, -8), 6, Color("#bcc2bc"))
+	draw_line(body + Vector2(-4, -8), body + Vector2(4, -8), INK, 2, true)
+	polygon(body, [Vector2(-11, -2), Vector2(-3, -2), Vector2(-3, 8),
+		Vector2(-7, 12), Vector2(-11, 8)], Color("#b26c56"))
+	draw_line(body + Vector2(9, 8), body + Vector2(13, -10), PAPER, 2, true)
 
 func draw_enemy(at: Vector2, hp: int) -> void:
 	draw_circle(at, 16, Color("#301e29"))
@@ -504,12 +592,13 @@ func draw_defense(at: Vector2, kind: String) -> void:
 
 func draw_sidebar() -> void:
 	draw_rect(Rect2(743, 135, 345, 382), Color("#18242e"))
-	label_at(Vector2(760, 163), "RANGER  /  LEVEL %d  /  XP %d of %d" % [journey.level, journey.xp, journey.xp_goal()], 17, GOLD)
-	label_at(Vector2(760, 196), "Campfire  %d/%d     Ranger  %d/%d" % [night.fire_hp, Night.MAX_FIRE_HP, night.ranger_hp, journey.max_health()], 19)
-	label_at(Vector2(760, 228), "Move  %d/%d     Actions  %d/%d" % [night.movement, Night.RANGER_MOVE + journey.move_bonus, night.ap, Night.MAX_AP], 19)
-	label_at(Vector2(760, 260), "Bow attacks  %d/%d     Range  %d" % [night.attacks, Night.MAX_ATTACKS, journey.bow_range()], 19)
-	label_at(Vector2(760, 292), "Supplies  %d" % night.supplies, 19)
-	draw_line(Vector2(760, 309), Vector2(1072, 309), Color("#43515b"))
+	label_at(Vector2(760, 163), "CAMP STATUS", 16, GOLD)
+	label_at(Vector2(760, 190), "Fire %d/%d   •   Supplies %d" % [night.fire_hp, Night.MAX_FIRE_HP, night.supplies], 20)
+	label_at(Vector2(760, 217), "Party level %d   •   XP %d / %d" % [journey.level, journey.xp, journey.xp_goal()], 17, MUTED)
+	draw_line(Vector2(760, 230), Vector2(1072, 230), Color("#43515b"))
+	label_at(Vector2(760, 253), "%s   %d / %d HP" % [active.title, active.hp, night.max_health(active)], 18, TEAL)
+	label_at(Vector2(760, 278), "Move %d/%d   •   AP %d/%d" % [active.movement, night.movement_limit(active), active.ap, Night.MAX_AP], 17)
+	label_at(Vector2(760, 302), "Attacks %d/%d   •   Range %d" % [active.attacks, night.attack_limit(active), night.attack_range(active)], 17)
 	if not pending_upgrades().is_empty():
 		label_at(Vector2(760, 337), "LEVEL UP   /   CHOOSE ONE", 18, GOLD)
 	else:
@@ -526,10 +615,9 @@ func draw_sidebar() -> void:
 				label_at(Vector2(760, 404), "Wall blocks. Trap triggers once.", 16, MUTED)
 				label_at(Vector2(760, 430), "Ballista fires each enemy phase.", 16, MUTED)
 			_:
-				label_at(Vector2(760, 350), "HOLD THE FIRE", 21, GOLD)
-				label_at(Vector2(760, 378), "Click teal to move, or a foe to shoot.", 16, MUTED)
-				label_at(Vector2(760, 404), "Hover foes for a route and target preview.", 16, MUTED)
-				label_at(Vector2(760, 430), "Stay in the light when you end the turn.", 16, MUTED)
+				label_at(Vector2(760, 394), "Click a hero to select, or use 1 / 2.", 16, MUTED)
+				label_at(Vector2(760, 420), "Teal tiles show movement. Click a foe to attack.", 14, MUTED)
+				label_at(Vector2(760, 444), "Hover a foe to preview its route.", 16, MUTED)
 	label_at(Vector2(32, 670), night.message, 17, PAPER)
 
 func draw_day() -> void:

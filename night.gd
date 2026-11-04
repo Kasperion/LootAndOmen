@@ -8,11 +8,9 @@ const SIZE := Vector2i(15, 11)
 const FIRE := Vector2i(7, 5)
 const LIGHT_RADIUS := 4
 const DARK_DAMAGE := 1
-const RANGER_MOVE := 3
 const ENEMY_MOVE := 3
 const ENEMY_RANGE := 1
 const MAX_AP := 3
-const MAX_ATTACKS := 2
 const MAX_FIRE_HP := 18
 const SPAWNS := [
 	[Vector2i(0, 2), Vector2i(14, 8)],
@@ -32,6 +30,20 @@ const STONEFORD_SPAWNS := [
 const DIRECTIONS := [Vector2i.RIGHT, Vector2i.DOWN, Vector2i.LEFT, Vector2i.UP]
 const BUILD_COST := {"Wall": 2, "Trap": 1, "Ballista": 3}
 
+class Hero:
+	var title: String
+	var tile: Vector2i
+	var hp: int
+	var movement: int
+	var ap: int
+	var attacks: int
+	var prepared := false
+
+	func _init(hero_name: String, start: Vector2i, health: int) -> void:
+		title = hero_name
+		tile = start
+		hp = health
+
 class Enemy:
 	var tile: Vector2i
 	var hp: int
@@ -44,14 +56,11 @@ class Enemy:
 var phase := Phase.PLAYER
 var wave := 0
 var turn := 1
-var ranger := FIRE + Vector2i.DOWN
 var journey: Journey
-var ranger_hp: int
+var ranger: Hero
+var knight: Hero
+var heroes: Array[Hero] = []
 var fire_hp := MAX_FIRE_HP
-var ap := MAX_AP
-var movement := RANGER_MOVE
-var attacks := MAX_ATTACKS
-var braced := false
 var kills := 0
 var loot: Dictionary = {}
 var rocks: Array
@@ -63,7 +72,9 @@ var message := ""
 
 func _init(run: Journey = null) -> void:
 	journey = run if run != null else Journey.new()
-	ranger_hp = journey.max_health()
+	ranger = Hero.new("Ranger", FIRE + Vector2i.DOWN, journey.max_health())
+	knight = Hero.new("Knight", FIRE + Vector2i.UP, 16 + journey.rank_of("knight_health") * 2)
+	heroes.assign([ranger, knight])
 	rocks = ROCKS if journey.site == 0 else STONEFORD_ROCKS
 	spawns = SPAWNS if journey.site == 0 else STONEFORD_SPAWNS
 
@@ -79,10 +90,32 @@ func start_wave() -> void:
 	message = "Wave %d approaches. Keep the fire alive." % wave
 
 func reset_actions() -> void:
-	ap = MAX_AP
-	movement = RANGER_MOVE + journey.move_bonus
-	attacks = MAX_ATTACKS
-	braced = false
+	for hero: Hero in heroes:
+		hero.ap = MAX_AP
+		hero.movement = movement_limit(hero)
+		hero.attacks = attack_limit(hero)
+		hero.prepared = false
+
+func max_health(hero: Hero) -> int:
+	return journey.max_health() if hero == ranger else 16 + journey.rank_of("knight_health") * 2
+
+func movement_limit(hero: Hero) -> int:
+	return 3 + journey.rank_of("move") if hero == ranger else 3
+
+func attack_limit(hero: Hero) -> int:
+	return 2 if hero == ranger else 1
+
+func attack_range(hero: Hero) -> int:
+	return journey.bow_range() if hero == ranger else 1
+
+func attack_damage(hero: Hero) -> int:
+	return journey.shot_damage() if hero == ranger else 3 + journey.rank_of("knight_damage")
+
+func hero_at(tile: Vector2i) -> Hero:
+	for hero: Hero in heroes:
+		if hero.hp > 0 and hero.tile == tile:
+			return hero
+	return null
 
 func distance(a: Vector2i, b: Vector2i) -> int:
 	return absi(a.x - b.x) + absi(a.y - b.y)
@@ -102,69 +135,91 @@ func enemy_at(tile: Vector2i) -> Enemy:
 func is_wall(tile: Vector2i) -> bool:
 	return defenses.has(tile) and defenses[tile].kind == "Wall"
 
-func ranger_reach() -> Dictionary:
-	if phase != Phase.PLAYER or movement == 0:
+func reach_for(hero: Hero) -> Dictionary:
+	if phase != Phase.PLAYER or hero.hp <= 0 or hero.movement == 0:
 		return {}
-	var reach := {ranger: 0}
-	var frontier: Array[Vector2i] = [ranger]
+	var reach := {hero.tile: 0}
+	var frontier: Array[Vector2i] = [hero.tile]
 	var index := 0
 	while index < frontier.size():
 		var tile := frontier[index]
 		index += 1
-		if reach[tile] == movement:
+		if reach[tile] == hero.movement:
 			continue
 		for step: Vector2i in DIRECTIONS:
 			var next := tile + step
 			if reach.has(next) or not on_board(next) or next == FIRE or next in rocks:
 				continue
-			if is_wall(next) or enemy_at(next) != null:
+			if is_wall(next) or enemy_at(next) != null or hero_at(next) != null:
 				continue
 			reach[next] = reach[tile] + 1
 			frontier.append(next)
 	return reach
 
-func move_ranger(tile: Vector2i) -> Array[Vector2i]:
-	var reach := ranger_reach()
+func move_hero(hero: Hero, tile: Vector2i) -> Array[Vector2i]:
+	var reach := reach_for(hero)
 	var path: Array[Vector2i] = []
-	if tile == ranger or not reach.has(tile):
+	if tile == hero.tile or not reach.has(tile):
 		return path
 	var cursor := tile
-	while cursor != ranger:
+	while cursor != hero.tile:
 		path.push_front(cursor)
 		for step: Vector2i in DIRECTIONS:
 			var previous := cursor + step
 			if reach.get(previous, -1) == reach[cursor] - 1:
 				cursor = previous
 				break
-	movement -= path.size()
-	ranger = tile
-	message = "Ranger moved." if is_lit(tile) else "Darkness deals damage if you end your turn here."
+	hero.movement -= path.size()
+	hero.tile = tile
+	message = "%s moved." % hero.title if is_lit(tile) else "Darkness deals damage if you end your turn here."
 	return path
 
-func can_shoot(tile: Vector2i, pin: bool = false) -> bool:
-	return phase == Phase.PLAYER and ap > 0 and attacks > 0 and enemy_at(tile) != null \
-		and distance(ranger, tile) <= journey.bow_range() and (not pin or journey.has_pin)
+func can_attack(hero: Hero, tile: Vector2i, pin: bool = false) -> bool:
+	return phase == Phase.PLAYER and hero.hp > 0 and hero.ap > 0 and hero.attacks > 0 \
+		and enemy_at(tile) != null and distance(hero.tile, tile) <= attack_range(hero) \
+		and (not pin or (hero == ranger and journey.rank_of("pin") > 0))
 
-func shoot(tile: Vector2i, pin: bool = false) -> bool:
-	if not can_shoot(tile, pin):
+func attack(hero: Hero, tile: Vector2i, pin: bool = false) -> bool:
+	if not can_attack(hero, tile, pin):
 		return false
 	var enemy := enemy_at(tile)
-	ap -= 1
-	attacks -= 1
-	var damage := journey.shot_damage()
+	hero.ap -= 1
+	hero.attacks -= 1
+	var damage := attack_damage(hero)
 	enemy.pinned = enemy.pinned or pin
 	damage_enemy(enemy, damage)
-	message = "Pinning Shot dealt %d damage." % damage if pin else "Bow shot dealt %d damage." % damage
+	var attack_name := "Sword strike" if hero == knight else ("Pinning Shot" if pin else "Bow shot")
+	message = "%s dealt %d damage." % [attack_name, damage]
 	finish_wave_if_clear()
 	return true
 
-func brace() -> bool:
-	if phase != Phase.PLAYER or ap == 0 or braced:
+func can_prepare(hero: Hero) -> bool:
+	return phase == Phase.PLAYER and hero.hp > 0 and hero.ap > 0 and not hero.prepared \
+		and (hero == knight or hero.attacks > 0)
+
+func prepare(hero: Hero) -> bool:
+	if not can_prepare(hero):
 		return false
-	ap -= 1
-	braced = true
-	message = "Braced for the next enemy hit."
+	hero.ap -= 1
+	hero.prepared = true
+	if hero == ranger:
+		hero.attacks -= 1
+		message = "Overwatch armed. Fires once when a creature moves within bow range."
+	else:
+		message = "Defend ready. The Knight will block the next melee hit against them."
 	return true
+
+func can_overwatch(enemy: Enemy) -> bool:
+	return ranger.hp > 0 and ranger.prepared and enemies.has(enemy) \
+		and distance(ranger.tile, enemy.tile) <= attack_range(ranger)
+
+func fire_overwatch(enemy: Enemy) -> void:
+	if not can_overwatch(enemy):
+		return
+	ranger.prepared = false
+	var damage := attack_damage(ranger)
+	damage_enemy(enemy, damage)
+	message = "Overwatch dealt %d damage." % damage
 
 func damage_enemy(enemy: Enemy, amount: int) -> void:
 	enemy.hp -= amount
@@ -193,7 +248,7 @@ func collect_loot() -> Array[String]:
 func build(kind: String, tile: Vector2i) -> bool:
 	if phase != Phase.BUILD or not BUILD_COST.has(kind) or supplies < BUILD_COST[kind]:
 		return false
-	if not on_board(tile) or not is_lit(tile) or tile == FIRE or tile == ranger:
+	if not on_board(tile) or not is_lit(tile) or tile == FIRE or hero_at(tile) != null:
 		return false
 	if tile in rocks or defenses.has(tile):
 		return false
@@ -216,21 +271,22 @@ func finish_wave_if_clear() -> bool:
 	return true
 
 func finish_if_lost() -> bool:
-	if fire_hp > 0 and ranger_hp > 0:
+	if fire_hp > 0 and (ranger.hp > 0 or knight.hp > 0):
 		return false
 	phase = Phase.DEFEAT
-	message = "The fire went out." if fire_hp <= 0 else "The Ranger fell."
+	message = "The fire went out." if fire_hp <= 0 else "The party fell."
 	return true
 
 func begin_enemy_phase() -> bool:
 	if phase != Phase.PLAYER:
 		return false
 	phase = Phase.ENEMY
-	if not is_lit(ranger):
-		ranger_hp = maxi(0, ranger_hp - DARK_DAMAGE)
-		message = "Darkness dealt %d damage." % DARK_DAMAGE
-	else:
-		message = "The creatures are moving."
+	var hurt: PackedStringArray = []
+	for hero: Hero in heroes:
+		if hero.hp > 0 and not is_lit(hero.tile):
+			hero.hp = maxi(0, hero.hp - DARK_DAMAGE)
+			hurt.append(hero.title)
+	message = "Darkness hurt %s." % " and ".join(hurt) if not hurt.is_empty() else "The creatures are moving."
 	finish_if_lost()
 	return true
 
@@ -249,7 +305,7 @@ func enemy_path(enemy: Enemy) -> Array[Vector2i]:
 			break
 		for step: Vector2i in DIRECTIONS:
 			var next := tile + step
-			if previous.has(next) or not on_board(next) or next == FIRE or next == ranger:
+			if previous.has(next) or not on_board(next) or next == FIRE or hero_at(next) != null:
 				continue
 			if next in rocks or enemy_at(next) != null:
 				continue
@@ -278,20 +334,29 @@ func step_enemy(enemy: Enemy, tile: Vector2i) -> bool:
 		message = "A creature triggered a trap."
 	return enemies.has(enemy)
 
-func attack_enemy_target(enemy: Enemy) -> Vector2i:
-	if distance(enemy.tile, ranger) <= ENEMY_RANGE:
-		if braced:
-			braced = false
-			message = "Brace absorbed the hit."
-		else:
-			ranger_hp = maxi(0, ranger_hp - 1)
-			message = "A creature hit the Ranger."
-		return ranger
-	if distance(enemy.tile, FIRE) <= ENEMY_RANGE:
-		fire_hp = maxi(0, fire_hp - 2)
-		message = "A creature struck the campfire."
+func enemy_target(from: Vector2i) -> Vector2i:
+	# Knight intercepts a melee attack when both heroes are adjacent.
+	for hero: Hero in [knight, ranger]:
+		if hero.hp > 0 and distance(from, hero.tile) <= ENEMY_RANGE:
+			return hero.tile
+	if distance(from, FIRE) <= ENEMY_RANGE:
 		return FIRE
 	return Vector2i(-1, -1)
+
+func attack_enemy_target(enemy: Enemy) -> Vector2i:
+	var target := enemy_target(enemy.tile)
+	var hero := hero_at(target)
+	if hero != null:
+		if hero == knight and hero.prepared:
+			hero.prepared = false
+			message = "The Knight blocked a hit with Defend."
+		else:
+			hero.hp = maxi(0, hero.hp - 1)
+			message = "A creature hit the %s." % hero.title
+	elif target == FIRE:
+		fire_hp = maxi(0, fire_hp - 2)
+		message = "A creature struck the campfire."
+	return target
 
 func ballista_target(tile: Vector2i) -> Enemy:
 	var closest: Enemy

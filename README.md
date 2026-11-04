@@ -6,13 +6,15 @@ A top-down, turn-based caravan defense game for solo play or cooperative parties
 
 Open the repository’s `project.godot` in Godot 4 and press **F5**. This single-player build follows the caravan from Pine Hollow to Stoneford.
 
-- Click teal tiles to move. The Ranger starts with 3 movement tiles per turn, which can be split before, between, or after attacks.
+- Click the Ranger or Knight, or press **1** or **2**, to switch heroes. Click highlighted tiles to move. The Ranger starts with 3 movement tiles per turn, which can be split before, between, or after attacks.
 - Click a creature within bow range to shoot. The Ranger starts with 3 action points and can shoot twice per turn. Each shot spends 1 action point and 1 bow attack.
-- Use **Brace** to spend 1 action point to absorb the next basic melee hit that turn. Hover over an enemy to preview its approach and possible target.
+- **Ranger — Overwatch:** Spend 1 action point and one bow attack to fire once when a creature moves within bow range during the enemy phase.
+- **Knight — Defend:** Spend 1 action point to block the next melee hit against the Knight this round. The Knight starts with 16 HP, 3 movement, 3 AP, and one adjacent sword strike per turn.
+- Hover over an enemy to preview its approach and possible target. Both heroes share a turn but spend their own budgets.
 - Press **Space** or click **End Turn**. Ending a turn outside the light costs 1 HP.
-- Earn XP for kills and surviving waves. Choose one of three upgrades at a wave break or before dawn. If unlocked, toggle **Pinning Shot** and click a creature to fire a slowing shot.
+- Earn XP for kills and surviving waves. Choose one of three upgrades at a wave break or before dawn. Most upgrades have three ranks, and effective bow range caps at eight tiles including equipment. If unlocked, toggle **Pinning Shot** and click a creature to fire a slowing shot.
 - Build walls, traps, or ballistae on free lit tiles between waves.
-- Survive the night and select **Break Camp at Dawn** to collect marked drops. Equip gear during the day, buy or sell at the roadside trader, and select **Set Up Camp at Dusk** to start the next defense.
+- Survive the night and select **Break Camp at Dawn** to collect loot marked by bags. Equip gear during the day, buy or sell at the roadside trader, and select **Set Up Camp at Dusk** to start the next defense.
 
 Night maps and waves are defined in `night.gd`. Gear, upgrades, and starting merchant stock are defined in `journey.gd`.
 
@@ -37,7 +39,8 @@ The camera looks down onto a visible tile grid around the camp. Map layout, spaw
 
 | Unit | Attack range | Movement per turn |
 | --- | ---: | ---: |
-| Ranger with a bow | 5 tiles | To be tuned |
+| Ranger with a bow | 5 tiles | 3 tiles |
+| Knight with a sword | 1 tile | 3 tiles |
 | Basic melee monster | 1 tile | Up to 3 tiles |
 
 Action point budgets, damage, movement and range measurement, line of sight, light radius, darkness damage timing, and co-op planning rules are playtest decisions. Cards are an optional design idea. The starting combat loop uses character abilities and action points.

@@ -10,23 +10,25 @@ const GEAR := {
 	"hide_armor": ["Hide Armor", "armor", "+4 max HP", 0, 0, 4, 7],
 }
 const UPGRADES := {
-	"range": ["Long Draw", "+1 bow range"],
-	"move": ["Trail Runner", "+1 movement each turn"],
-	"pin": ["Pinning Shot", "Unlock a shot that slows a survivor"],
-	"health": ["Hardy", "+2 maximum and current HP"],
-	"damage": ["Heavy Draw", "+1 damage on every bow shot"],
+	"range": ["Bow Range", "+1 bow range, up to 8 total", 3],
+	"move": ["Trail Runner", "+1 Ranger movement per turn", 3],
+	"pin": ["Pinning Shot", "Unlock a bow attack that slows a survivor", 1],
+	"health": ["Hardy", "+2 Ranger maximum and current HP", 3],
+	"damage": ["Heavy Draw", "+1 damage on Ranger bow attacks", 3],
+	"knight_health": ["Shield Veteran", "+2 Knight maximum and current HP", 3],
+	"knight_damage": ["Sword Mastery", "+1 Knight sword damage", 3],
 }
-const LEVEL_OFFERS := [["range", "move", "pin"], ["health", "damage", "move"],
-	["range", "health", "pin"]]
+const LEVEL_OFFERS := [
+	["range", "move", "pin", "knight_health", "damage", "knight_damage", "health"],
+	["knight_health", "damage", "knight_damage", "health", "move", "range", "pin"],
+	["range", "health", "knight_damage", "pin", "move", "knight_health", "damage"],
+]
+const ROMAN := ["I", "II", "III"]
 
 var site := 0
 var level := 1
 var xp := 0
-var range_bonus := 0
-var move_bonus := 0
-var health_bonus := 0
-var damage_bonus := 0
-var has_pin := false
+var ranks: Dictionary = {}
 var gold := 4
 var inventory: Array[String] = ["hunting_bow", "travel_coat"]
 var equipment := {"bow": "hunting_bow", "armor": "travel_coat"}
@@ -37,35 +39,40 @@ var trading := false
 func xp_goal() -> int:
 	return 12 + (level - 1) * 8
 
+func rank_of(id: String) -> int:
+	return ranks.get(id, 0)
+
 func level_choices() -> Array[String]:
 	var choices: Array[String] = []
 	if xp < xp_goal():
 		return choices
 	for id: String in LEVEL_OFFERS[(level - 1) % LEVEL_OFFERS.size()]:
-		choices.append("damage" if id == "pin" and has_pin else id)
+		if rank_of(id) < UPGRADES[id][2]:
+			choices.append(id)
+			if choices.size() == 3:
+				break
 	return choices
+
+func upgrade_name(id: String, rank: int) -> String:
+	var info: Array = UPGRADES[id]
+	return info[0] if info[2] == 1 else "%s %s" % [info[0], ROMAN[rank - 1]]
 
 func upgrade(id: String) -> bool:
 	if id not in level_choices():
 		return false
 	xp -= xp_goal()
 	level += 1
-	match id:
-		"range": range_bonus += 1
-		"move": move_bonus += 1
-		"health": health_bonus += 2
-		"damage": damage_bonus += 1
-		"pin": has_pin = true
+	ranks[id] = rank_of(id) + 1
 	return true
 
 func bow_range() -> int:
-	return 5 + range_bonus + GEAR[equipment.bow][3]
+	return mini(8, 5 + rank_of("range") + GEAR[equipment.bow][3])
 
 func shot_damage() -> int:
-	return 2 + damage_bonus + GEAR[equipment.bow][4]
+	return 2 + rank_of("damage") + GEAR[equipment.bow][4]
 
 func max_health() -> int:
-	return 12 + health_bonus + GEAR[equipment.armor][5]
+	return 12 + rank_of("health") * 2 + GEAR[equipment.armor][5]
 
 func collect_loot(items: Array[String]) -> void:
 	inventory.append_array(items)
