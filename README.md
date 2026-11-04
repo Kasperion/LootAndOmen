@@ -2,6 +2,17 @@
 
 A top-down, turn-based caravan defense game for solo play or cooperative parties. Travel across the land by day. When night falls, make camp and keep the fire alive as creatures emerge from the encroaching darkness.
 
+## Play the first prototype
+
+Open the repository’s `project.godot` in Godot 4.3 or newer and press **F5**. The current build is a single-player campsite with three waves and animated prototype graphics.
+
+- Click a teal tile to move once, up to 3 tiles. Move before shooting.
+- Click an enemy within 5 tiles to shoot. A shot costs 1 of the Ranger’s 2 action points.
+- Press **Space** or click **End Turn**. Ending a turn outside the light costs 1 HP. Creatures move up to 3 tiles and attack adjacent targets.
+- Between waves, choose a wall, trap, or ballista and place it on a free lit tile. Click **Start Next Wave** when ready.
+
+The map dimensions, obstacles, campfire, and wave spawn tiles are defined in `night.gd`.
+
 ## The caravan journey
 
 1. **Travel.** Lead the caravan across the land and stop to make camp before nightfall.
