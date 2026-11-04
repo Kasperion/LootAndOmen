@@ -6,11 +6,13 @@ A top-down, turn-based caravan defense game for solo play or cooperative parties
 
 Open the repository’s `project.godot` in Godot 4 and press **F5**. This single-player build follows the caravan from Pine Hollow to Stoneford.
 
-- Click a portrait in **Party**, click the Ranger or Knight on the map, or press **1** or **2** to switch heroes and inspect their equipment. Click highlighted tiles to move. Scroll to zoom, drag the field to pan, and press **F11** to toggle fullscreen. Each hero starts with 3 movement tiles per turn, which can be split before, between, or after attacks.
+- Click a portrait in **Party**, click a living hero on the map, or press **1**, **2**, or **3** to switch heroes and inspect their equipment. Click highlighted tiles to move. Scroll to zoom, drag the field to pan, and press **F11** to toggle fullscreen. Each hero starts with 3 movement tiles per turn, which can be split before, between, or after attacks.
 - Click a creature within the selected hero’s weapon range to attack. Bows have a minimum range of 2 tiles. The Ranger starts with 3 action points and can shoot twice per turn. Each shot spends 1 action point and 1 bow attack.
 - **Ranger — Overwatch:** Spend 1 action point and one bow attack to fire once when a creature moves within bow range during the enemy phase.
 - **Knight — Defend:** The equipped shield and armor passively reduce melee damage. Spend 1 action point on Defend to reduce the next melee hit by an additional point, plus any Shield Drill ranks. The Knight starts with 18 HP, 3 movement, 3 AP, and one adjacent sword strike per turn.
-- Hover over an enemy to preview its approach and possible target. Both heroes share a turn but spend their own budgets.
+- **Priest — Heal and Revival:** Starts with 14 HP, 3 movement, 3 AP, a Travel Coat, and one adjacent Pilgrim Mace strike per turn. Spend 1 AP to restore 3 HP to yourself or an adjacent living ally. Merciful Light adds 1 HP per rank, up to rank III.
+- Click an adjacent downed ally or use **Revive** to return them at 1 HP. It costs 2 AP for the Ranger or Knight and 1 AP for the Priest. Revived heroes regain their action and movement budgets on the next turn.
+- Hover over an enemy to preview its approach and possible target. The heroes share a turn and spend their own budgets.
 - Press **Space** or click **End Turn**. Ending a turn outside the circular firelight costs 1 HP.
 - The hero who lands the killing blow earns 4 XP. Every party member earns 6 XP for a cleared wave. Traps and ballistae do not award individual kill XP. Each hero chooses their own upgrades at a wave break or before dawn. Most upgrades have three ranks, and effective bow range caps at eight tiles including equipment. If unlocked, toggle **Pinning Shot** and click a creature to fire a slowing shot.
 - Build walls, traps, or ballistae on free lit tiles between waves. Click an existing wall or ballista during preparation to open its on-map **Upgrade**, **Repair**, and **Destroy** controls. Ballista upgrades increase range and damage, and wall upgrades increase maximum HP. Repair costs 1 supply and restores full HP. Destroy returns half the build and upgrade cost, rounded down. Adjacent wall segments join automatically.
@@ -27,6 +29,7 @@ Open the repository’s `project.godot` in Godot 4 and press **F5**. This single
 | Longbow | 2–7 | 2 |
 | Short Sword | 1 | 5 |
 | Iron Sword | 1 | 6 |
+| Pilgrim Mace | 1 | 3 |
 
 Night maps and waves are defined in `night.gd`. Gear, upgrades, and starting merchant stock are defined in `journey.gd`.
 

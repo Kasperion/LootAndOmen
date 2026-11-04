@@ -18,6 +18,7 @@ const SPRITES := {
 	"boss": preload("res://art/heavy_ink/boss.png"),
 	"ranger": preload("res://art/heavy_ink/ranger.png"),
 	"knight": preload("res://art/heavy_ink/knight.png"),
+	"priest": preload("res://art/heavy_ink/priest.png"),
 	"rock": preload("res://art/heavy_ink/rock.png"),
 	"tree": preload("res://art/heavy_ink/tree.png"),
 	"cliff": preload("res://art/heavy_ink/cliff.png"),
@@ -56,6 +57,8 @@ var pointer_last := Vector2.ZERO
 var dragging := false
 var attack_actor: Variant
 var firing_tile := Night.NO_TILE
+var animation_frames: Dictionary = {}
+var outlines: Dictionary = {}
 var damaged_tile := Night.NO_TILE
 var fallen_defenses: Dictionary = {}
 var attack_offset := Vector2.ZERO
@@ -64,6 +67,9 @@ var hit_actor: Night.Enemy
 var dawn_loot: Array[String] = []
 var day_message := ""
 var pin_selected := false
+var heal_selected := false
+var blessing_tile := Night.NO_TILE
+var blessing_until := 0.0
 var intent_tile := Vector2i(-1, -1)
 var intent_path: Array[Vector2i] = []
 var intent_target := Vector2i(-1, -1)
@@ -84,6 +90,12 @@ var hit_position := Vector2.ZERO
 var hit_until := 0.0
 
 func _ready() -> void:
+	for key in ["ranger", "knight", "priest", "husk", "skitter", "brute", "boss"]:
+		var frames: Array[Texture2D] = []
+		for pose in ["walk_a", "walk_b", "attack", "hit", "down"]:
+			var path := "res://art/heavy_ink/%s_%s.png" % [key, pose]
+			frames.append(load(path) as Texture2D if ResourceLoader.exists(path) else null)
+		animation_frames[key] = frames
 	add_child(audio)
 	night_shade = BoardArt.new().make_night_shade(Night.SIZE, Night.FIRE, CELL, Night.LIGHT_RADIUS)
 	make_button("Wall", "Wall  [2]", Vector2(935, 470), 98, choose_build.bind("Wall"))
@@ -114,13 +126,14 @@ func _ready() -> void:
 		make_button("manage_" + action, action, Vector2(935 + i * 110, 425), 104, manage_defense.bind(action))
 	make_button("defense_close", "×", Vector2.ZERO, 29, close_defense)
 	buttons.defense_close.size = Vector2(29, 29)
-	for i in 2:
+	for i in 3:
 		make_button("hero%d" % i, "", Vector2(929, 74 + i * 65), 323, select_hero.bind(i))
 		var card: Button = buttons["hero%d" % i]
 		card.flat = true
 		card.size.y = 60
 		card.tooltip_text = "Select %s and view their details." % night.heroes[i].title
 	make_button("special", "", Vector2(935, 470), 152, prepare_special)
+	make_button("revive", "", Vector2(1099, 470), 164, revive_nearby)
 	make_button("pin", "Pinning Shot", Vector2(1099, 470), 164, toggle_pin)
 	for i in 3:
 		make_button("upgrade%d" % i, "", Vector2(935, 350 + 56 * i), 328, choose_upgrade.bind(i))
@@ -189,6 +202,8 @@ func begin_night(supplies: int = 0) -> void:
 	pin_selected = false
 	hit_until = 0.0
 	fallen_defenses.clear()
+	blessing_until = 0.0
+	heal_selected = false
 	firing_tile = Night.NO_TILE
 	damaged_tile = Night.NO_TILE
 	night.start_wave()
@@ -236,7 +251,7 @@ func refresh() -> void:
 		refresh_menu()
 		return
 	buttons.advance.show()
-	for i in 2:
+	for i in 3:
 		var card: Button = buttons["hero%d" % i]
 		card.show()
 		card.disabled = busy or leveling != null
@@ -263,12 +278,20 @@ func refresh() -> void:
 		button.modulate = GOLD if kind == selected_build else Color.WHITE
 	buttons.special.visible = night.phase == Night.Phase.PLAYER
 	buttons.special.disabled = busy or not night.can_prepare(active)
-	if active == night.ranger:
+	buttons.revive.visible = night.phase == Night.Phase.PLAYER and adjacent_fallen() != null
+	buttons.revive.disabled = busy or not night.can_revive(active, adjacent_fallen())
+	buttons.revive.text = "Revive [%d AP]" % night.revive_cost(active)
+	if active == night.priest:
+		buttons.special.text = "Select heal target" if heal_selected else "Heal [1 AP]"
+		buttons.special.tooltip_text = "Restore up to %d HP to yourself or an adjacent living ally." % night.heal_power()
+		buttons.special.disabled = busy or active.ap <= 0 or active.hp <= 0
+	elif active == night.ranger:
 		buttons.special.text = "Overwatch Ready" if active.prepared else "Overwatch [1 AP]"
 		buttons.special.tooltip_text = "Spend 1 AP and one bow attack. Fire once at a creature that moves within bow range this enemy phase."
 	else:
 		buttons.special.text = "Defend Ready" if active.prepared else "Defend [1 AP]"
 		buttons.special.tooltip_text = "Spend 1 AP to reduce the next melee hit against the Knight by an additional %d." % (1 + active.character.rank_of("guard"))
+	buttons.pin.position.y = 523 if buttons.revive.visible else 470
 	buttons.pin.visible = night.phase == Night.Phase.PLAYER and active == night.ranger and active.character.rank_of("pin") > 0
 	buttons.pin.disabled = busy or active.ap == 0 or active.attacks == 0
 	buttons.pin.modulate = GOLD if pin_selected else Color.WHITE
@@ -384,11 +407,32 @@ func select_hero(index: int) -> void:
 	if busy or hero_to_upgrade() != null:
 		return
 	active = night.heroes[index]
+	heal_selected = false
 	pin_selected = false
 	refresh()
 
 func prepare_special() -> void:
-	if not busy and night.prepare(active):
+	if busy:
+		return
+	if active == night.priest:
+		heal_selected = not heal_selected
+		refresh()
+	elif night.prepare(active):
+		refresh()
+
+func adjacent_fallen() -> Night.Hero:
+	var fallback: Night.Hero
+	for hero: Night.Hero in night.heroes:
+		if night.can_revive(active, hero):
+			return hero
+		if hero.hp == 0 and night.distance(active.tile, hero.tile) == 1:
+			fallback = hero
+	return fallback
+
+func revive_nearby() -> void:
+	var target := adjacent_fallen()
+	if not busy and night.revive(active, target):
+		bless(target.tile)
 		refresh()
 
 func toggle_pin() -> void:
@@ -527,10 +571,10 @@ func _input(event: InputEvent) -> void:
 		KEY_SPACE:
 			get_viewport().set_input_as_handled()
 			advance()
-		KEY_1, KEY_2:
+		KEY_1, KEY_2, KEY_3:
 			if not busy:
 				get_viewport().set_input_as_handled()
-				select_hero(0 if event.keycode == KEY_1 else 1)
+				select_hero(event.keycode - KEY_1)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not pointer_allowed() or not (event is InputEventMouseButton and event.pressed):
@@ -572,6 +616,22 @@ func board_click(tile: Vector2i) -> void:
 
 func play_at(tile: Vector2i) -> void:
 	var ally := night.hero_at(tile)
+	if heal_selected and active == night.priest:
+		if night.heal(ally):
+			bless(tile)
+			heal_selected = false
+		else:
+			night.message = "Choose an injured living ally within 1 tile, or click Heal to cancel."
+		refresh()
+		return
+	var fallen := night.fallen_at(tile)
+	if fallen != null and ally == null:
+		if night.revive(active, fallen):
+			bless(tile)
+		else:
+			night.message = "Revive requires a free adjacent tile and %d AP." % night.revive_cost(active)
+		refresh()
+		return
 	if ally != null:
 		select_hero(night.heroes.find(ally))
 		return
@@ -637,6 +697,7 @@ func advance() -> void:
 				break
 			await resolve_enemy(enemy)
 	night.next_turn()
+	heal_selected = false
 	pin_selected = false
 	busy = false
 	refresh()
@@ -761,7 +822,7 @@ func _draw() -> void:
 	if day != Day.NIGHT:
 		draw_day()
 	else:
-		draw_set_transform(camera_offset, 0, Vector2.ONE * camera_zoom)
+		draw_set_transform_matrix(board_transform())
 		draw_board()
 		draw_effects()
 		draw_set_transform(Vector2.ZERO)
@@ -860,7 +921,13 @@ func draw_board() -> void:
 	for tile: Vector2i in fallen_defenses:
 		if not night.defenses.has(tile):
 			draw_rubble(center(tile), fallen_defenses[tile] == "Ballista")
-	for tile: Vector2i in night.defenses:
+	var defense_tiles := night.defenses.keys()
+	defense_tiles.sort_custom(func(a: Vector2i, b: Vector2i) -> bool: return a.y < b.y)
+	for tile: Vector2i in defense_tiles:
+		var piece: Dictionary = night.defenses[tile]
+		if piece.kind == "Wall":
+			draw_linked_wall(tile, center(tile), piece.level, 1.0, 0.0, true)
+	for tile: Vector2i in defense_tiles:
 		draw_defense(tile, night.defenses[tile])
 		if tile == inspected_defense:
 			draw_rect(tile_rect(tile).grow(-2), GOLD, false, 2)
@@ -874,12 +941,11 @@ func draw_board() -> void:
 		draw_enemy(enemy_center(hit_actor, hit_actor.tile), hit_actor)
 	for hero: Night.Hero in night.heroes:
 		if hero.hp <= 0:
+			draw_fallen(hero)
 			continue
 		var at := motion_from.lerp(motion_to, motion_progress) if motion_actor == hero else center(hero.tile)
-		draw_unit("ranger" if hero == night.ranger else "knight", at, 51.0, hero,
+		draw_unit(hero.title.to_lower(), at, 51.0, hero,
 			damaged_tile == hero.tile and hit_position == center(hero.tile), false)
-		if hero == active:
-			draw_arc(at, 20, 0, TAU, 24, TEAL, 2, true)
 		if hero.prepared:
 			draw_circle(at + Vector2(15, -15), 4, GOLD)
 
@@ -909,45 +975,90 @@ func polygon(at: Vector2, points: Array, color: Color) -> void:
 		vertices.append(at + point)
 	draw_colored_polygon(vertices, color)
 
+func sprite_rect(texture: Texture2D, at: Vector2, side: float) -> Rect2:
+	var size := texture.get_size() * (side / maxf(texture.get_width(), texture.get_height()))
+	return Rect2(at - size * 0.5, size)
+
 func draw_sprite(key: String, at: Vector2, side: float, tint := Color.WHITE) -> void:
 	var texture: Texture2D = SPRITES[key]
-	var size := texture.get_size() * (side / maxf(texture.get_width(), texture.get_height()))
-	draw_texture_rect(texture, Rect2(at - size * 0.5, size), false, tint)
+	draw_texture_rect(texture, sprite_rect(texture, at, side), false, tint)
+
+func silhouette(texture: Texture2D) -> Texture2D:
+	if not outlines.has(texture):
+		var source := texture.get_image()
+		source.decompress()
+		var mask := Image.create_empty(source.get_width(), source.get_height(), false, Image.FORMAT_RGBA8)
+		for y in source.get_height():
+			for x in source.get_width():
+				mask.set_pixel(x, y, Color(1, 1, 1, source.get_pixel(x, y).a))
+		outlines[texture] = ImageTexture.create_from_image(mask)
+	return outlines[texture]
 
 func draw_fire(at: Vector2) -> void:
+	draw_sprite("embers", at + Vector2(0, 4), 45.0)
 	if night.fire_hp == 0:
-		draw_sprite("embers", at, 42.0)
 		return
+	var pulse := sin(clock * 13.0) * 2.0
 	for i in range(3, 0, -1):
-		draw_circle(at, 10.0 + i * 7.0, Color(1.0, 0.57, 0.23, 0.06))
-	draw_sprite("campfire", at + Vector2(0, -5), 49.0 + sin(clock * 9.0) * 2.0)
+		draw_circle(at, 10.0 + i * 7.0 + pulse, Color(1.0, 0.57, 0.23, 0.045))
 	for i in 3:
-		var rise := fposmod(clock * 18.0 + i * 9.0, 28.0)
-		draw_circle(at + Vector2(sin(rise * 0.23 + i) * 6, -13 - rise), 1.5,
-			Color(1.0, 0.75, 0.4, 1.0 - rise / 29.0))
+		var root := at + Vector2(i * 7 - 7, 3 - i % 2 * 3)
+		var phase := clock * (11.0 + i) + i * 2.3
+		var lean := sin(phase) * 5.0
+		var height := 21.0 + i % 2 * 10.0 + sin(phase * 1.43) * 5.0
+		polygon(root, [Vector2(-7, 2), Vector2(-8, -6), Vector2(lean * 0.3 - 4, -height * 0.58),
+			Vector2(lean, -height), Vector2(lean + 3, -height * 0.68),
+			Vector2(8, -9), Vector2(6, 2)], Color("#2b1b17"))
+		polygon(root, [Vector2(-5, 1), Vector2(-6, -5), Vector2(lean * 0.3 - 2, -height * 0.54),
+			Vector2(lean, -height + 3), Vector2(lean + 2, -height * 0.63),
+			Vector2(6, -8), Vector2(5, 1)], Color("#ed7833"))
+		polygon(root, [Vector2(-4, 1), Vector2(-3, -7), Vector2(lean * 0.55, -height * 0.56),
+			Vector2(3, -7), Vector2(4, 1)], Color("#ffd486"))
+	for i in 5:
+		var rise := fposmod(clock * 24.0 + i * 9.0, 40.0)
+		draw_circle(at + Vector2(sin(rise * 0.18 + i) * 9, -9 - rise), 1.4,
+			Color(1.0, 0.75, 0.4, 1.0 - rise / 41.0))
+
+func draw_fallen(hero: Night.Hero) -> void:
+	var at := center(hero.tile)
+	polygon(at, [Vector2(-24, 10), Vector2(-16, 1), Vector2(-2, 5), Vector2(7, -2),
+		Vector2(24, 8), Vector2(19, 15), Vector2(3, 18), Vector2(-11, 16)], Color("#491d23"))
+	draw_circle(at + Vector2(24, 16), 2.0, Color("#632632"))
+	var key := hero.title.to_lower()
+	var texture: Texture2D = animation_frames[key][4]
+	if texture != null:
+		draw_texture_rect(texture, sprite_rect(texture, at, 53.0), false)
+
+func board_transform() -> Transform2D:
+	return Transform2D(0.0, Vector2.ONE * camera_zoom, 0.0, camera_offset)
 
 func draw_unit(key: String, at: Vector2, side: float, actor: Variant, hit: bool, dead: bool) -> void:
-	var offset := Vector2(0, sin(clock * 5.0) * 0.7)
-	var tilt := 0.0
-	var scale_factor := Vector2.ONE
+	var pose := -1
+	var offset := Vector2.ZERO
 	var tint := Color.WHITE
 	if motion_actor == actor:
-		offset.y = -absf(sin(motion_progress * TAU)) * 5.0
-		tilt = sin(motion_progress * TAU) * 0.14
+		pose = 0 if motion_progress < 0.5 else 1
 	if attack_actor == actor:
+		pose = 2
 		var strength := sin(arrow_progress * PI) if key == "ranger" else attack_progress
-		offset += attack_offset * strength
-		scale_factor = Vector2(1.0 + 0.14 * strength, 1.0 - 0.08 * strength)
+		offset = attack_offset * strength
 	if hit and hit_until > clock:
+		pose = 3
 		var remaining := clampf((hit_until - clock) / 0.23, 0.0, 1.0)
-		offset += Vector2(-5, -3) * remaining
-		tilt -= 0.18 * remaining
+		offset += Vector2(-4, -2) * remaining
 		tint = Color.WHITE.lerp(Color("#ff9b88"), remaining)
 		if dead:
 			tint.a = remaining
-	draw_set_transform_matrix(Transform2D(0.0, Vector2.ONE * camera_zoom, 0.0, camera_offset) * Transform2D(tilt, scale_factor, 0.0, at + offset))
-	draw_sprite(key, Vector2.ZERO, side, tint)
-	draw_set_transform_matrix(Transform2D(0.0, Vector2.ONE * camera_zoom, 0.0, camera_offset))
+	var texture: Texture2D = SPRITES[key]
+	if pose >= 0 and animation_frames[key][pose] != null:
+		texture = animation_frames[key][pose]
+	var rect := sprite_rect(texture, at + offset, side)
+	if actor == active and not dead:
+		var mask := silhouette(texture)
+		for i in 12:
+			var edge := Vector2.from_angle(TAU * i / 12.0) * 1.8
+			draw_texture_rect(mask, Rect2(rect.position + edge, rect.size), false, TEAL)
+	draw_texture_rect(texture, rect, false, tint)
 
 func draw_enemy(at: Vector2, enemy: Night.Enemy) -> void:
 	var side := float(CELL * enemy.size - 4)
@@ -972,10 +1083,16 @@ func draw_defense(tile: Vector2i, piece: Dictionary) -> void:
 		"Ballista":
 			var recoil := Vector2(5, -4) * sin(arrow_progress * PI) if firing_tile == tile else Vector2.ZERO
 			var tint := Color.WHITE.lerp(Color("#ff9b88"), impact)
-			draw_sprite("ballista_%d" % piece.level, at + recoil + Vector2(3, -2) * impact, 53.0, tint)
+			var carriage := at + recoil + Vector2(3, -2) * impact
+			draw_sprite("ballista_%d" % piece.level, carriage, 53.0, tint)
+			if firing_tile == tile:
+				var snap := exp(-arrow_progress * 6.0) * cos(arrow_progress * 20.0)
+				var string_center := Vector2(-4, 5) + Vector2(8, -7) * snap
+				draw_polyline(PackedVector2Array([carriage + Vector2(-22, 4),
+					carriage + string_center, carriage + Vector2(12, 15)]), Color("#c9a477"), 1.2, true)
 			if hp_ratio <= 0.5:
 				draw_rubble(at + Vector2(13, 12), true)
-	if Night.STRUCTURE_HP.has(piece.kind):
+	if Night.STRUCTURE_HP.has(piece.kind) and (hp_ratio < 1.0 or tile == inspected_defense):
 		draw_rect(Rect2(at + Vector2(-19, -25), Vector2(38, 5)), INK)
 		draw_rect(Rect2(at + Vector2(-18, -24), Vector2(36 * hp_ratio, 3)), TEAL if hp_ratio > 0.4 else RED)
 
@@ -986,48 +1103,88 @@ func draw_rubble(at: Vector2, metal: bool) -> void:
 		polygon(chip, [Vector2(-6, 4), Vector2(-3, -5), Vector2(5, -3), Vector2(7, 3)], INK)
 		polygon(chip, [Vector2(-4, 2), Vector2(-2, -3), Vector2(4, -2), Vector2(5, 2)], material)
 
-func draw_linked_wall(tile: Vector2i, at: Vector2, level: int, hp: float, impact: float) -> void:
+func draw_linked_wall(tile: Vector2i, at: Vector2, level: int, hp: float, impact: float, rails_only := false) -> void:
 	var links := night.wall_links(tile)
 	var connected := not links.is_empty()
 	if not connected:
 		links = [Vector2i.LEFT, Vector2i.RIGHT]
-	for direction: Vector2i in links:
-		var axis := Vector2(direction)
-		var across := axis.orthogonal()
-		var tip := at + axis * (CELL * 0.5 if connected else 19.0)
-		draw_line(at + Vector2(2, 5), tip + Vector2(2, 5), Color(0, 0, 0, 0.45), 18)
-		draw_line(at, tip, Color("#211815"), 17)
-		draw_line(at, tip, Color("#674430"), 13)
-		for i in 3:
-			var post := at.lerp(tip, (i + 0.5) / 3.0)
-			var height := 9.0 if hp > 0.5 or i == 2 else 4.0 + i
-			var wood := Color("#ae7950").lerp(Color("#da9375"), impact)
-			polygon(post, [-axis * 4 + across * 5, -axis * 4 - across * height,
-				-axis - across * (height + 3), axis * 4 - across * height, axis * 4 + across * 5], wood)
-			draw_line(post - across * height, post + across * 5, Color("#583a2c"), 1.4)
-		if level >= 2:
-			draw_line(at + across * 3, tip + across * 3, Color("#888789"), 3)
-		if level >= 3:
-			draw_circle(at.lerp(tip, 0.68) + across * 3, 2.3, GOLD)
-	draw_rect(Rect2(at - Vector2(6, 6), Vector2(12, 12)), Color("#221916"))
-	draw_rect(Rect2(at - Vector2(4, 4), Vector2(8, 8)), Color("#aa7854") if level == 1 else Color("#8b8e89"))
+	var foundation := at + Vector2(0, 5)
+	var span := CELL * 0.5 + 0.5 if connected else 20.0
+	var rail_y := Vector2(0, -4)
+	for direction in links:
+		var end := foundation + Vector2(direction) * span
+		if rails_only:
+			draw_line(foundation + Vector2(3, 4), end + Vector2(3, 4), Color(0, 0, 0, 0.38), 17)
+			draw_line(foundation, end, Color("#211815"), 15)
+			draw_line(foundation, end, Color("#74523c"), 10)
+			draw_line(foundation + rail_y, end + rail_y, Color("#b4865b"), 3)
+			if level >= 2:
+				draw_line(foundation + Vector2(0, 3), end + Vector2(0, 3), Color("#777c7d"), 3)
+			continue
+		# Every stake points up on screen, including the stakes on vertical runs.
+		for i in 2:
+			var foot := foundation.lerp(end, (i + 1) / 3.0)
+			draw_wall_stake(foot, level, hp <= 0.5 and i == 1, impact)
+	if rails_only:
+		return
+	draw_wall_stake(foundation, level, false, impact)
 	if hp <= 0.5:
-		draw_rubble(at + Vector2(0, 10), false)
+		draw_rubble(at + Vector2(1, 13), false)
+
+func draw_wall_stake(at: Vector2, level: int, broken: bool, impact: float) -> void:
+	var tip := -14.0 if not broken else -5.0
+	var wood := Color("#a57652").lerp(Color("#e3977e"), impact)
+	polygon(at, [Vector2(-5, 5), Vector2(-5, tip + 4), Vector2(0, tip),
+		Vector2(5, tip + 4), Vector2(5, 4)], Color("#211815"))
+	polygon(at, [Vector2(-3, 3), Vector2(-3, tip + 5), Vector2(0, tip + 2),
+		Vector2(3, tip + 5), Vector2(3, 2)], wood)
+	draw_line(at + Vector2(1, tip + 5), at + Vector2(2, 2), Color("#593d32"), 1.6)
+	if level >= 2:
+		draw_line(at + Vector2(-4, -1), at + Vector2(4, -1), Color("#969697"), 2)
+	if level >= 3:
+		draw_circle(at + Vector2(0, -1), 1.6, GOLD)
 
 func weapon_range(hero: Night.Hero) -> String:
 	var minimum: int = hero.character.weapon().min
 	var maximum := night.attack_range(hero)
 	return str(maximum) if minimum == maximum else "%d–%d" % [minimum, maximum]
 
+func draw_hud_frame(rect: Rect2, fill: Color, border := Color("#8a7257")) -> void:
+	draw_rect(rect, fill)
+	draw_rect(rect, border.darkened(0.35), false, 1.0)
+	for x in [rect.position.x, rect.end.x]:
+		for y in [rect.position.y, rect.end.y]:
+			var corner := Vector2(x, y)
+			var inside := (rect.get_center() - corner).sign()
+			draw_line(corner, corner + Vector2(8 * inside.x, 0), border, 2)
+			draw_line(corner, corner + Vector2(0, 8 * inside.y), border, 2)
+
+func draw_gear_icon(slot: String, at: Vector2) -> void:
+	match slot:
+		"bow":
+			draw_arc(at + Vector2(-4, 0), 8, -1.05, 1.05, 10, GOLD, 2.5, true)
+			draw_line(at + Vector2(0, -7), at + Vector2(0, 7), PAPER, 1)
+		"shield":
+			polygon(at, [Vector2(-6, -7), Vector2(6, -7), Vector2(5, 3), Vector2(0, 8), Vector2(-5, 3)], GOLD)
+			draw_line(at + Vector2(0, -5), at + Vector2(0, 5), INK, 2)
+		"armor":
+			polygon(at, [Vector2(-7, -6), Vector2(-3, -8), Vector2(0, -4), Vector2(3, -8),
+				Vector2(7, -6), Vector2(5, 7), Vector2(-5, 7)], GOLD)
+		_:
+			draw_line(at + Vector2(-5, 6), at + Vector2(5, -7), PAPER, 2.5, true)
+			if slot == "mace":
+				draw_circle(at + Vector2(5, -6), 3.5, GOLD)
+			else:
+				draw_line(at + Vector2(-7, 1), at + Vector2(-1, 6), GOLD, 2)
+
 func draw_party() -> void:
-	draw_rect(Rect2(918, 52, 345, 470), HUD)
+	draw_hud_frame(Rect2(918, 52, 345, 470), HUD)
 	label_at(Vector2(931, 67), "PARTY", 15, GOLD)
 	for i in night.heroes.size():
 		var hero := night.heroes[i]
 		var row := Rect2(929, 74 + i * 65, 323, 60)
-		draw_rect(row, Color("#263d3b") if active == hero else Color("#222d36"))
-		draw_rect(row, TEAL if active == hero else Color("#40515c"), false, 1)
-		draw_sprite("ranger" if i == 0 else "knight", row.position + Vector2(30, 30), 48.0)
+		draw_hud_frame(row, Color("#263d3b") if active == hero else Color("#222d36"), TEAL if active == hero else Color("#8a7257"))
+		draw_sprite(hero.title.to_lower(), row.position + Vector2(30, 30), 48.0)
 		var hp := night.max_health(hero) if day != Day.NIGHT else hero.hp
 		var hp_ratio := float(hp) / night.max_health(hero)
 		label_at(row.position + Vector2(64, 22), "%d  %s   Lv. %d" % [i + 1, hero.title, hero.character.level], 17)
@@ -1045,13 +1202,17 @@ func draw_loadout() -> void:
 	var character := active.character
 	label_at(Vector2(931, 312), "%s   •   XP %d / %d" % [active.title, character.xp, character.xp_goal()], 17, TEAL)
 	label_at(Vector2(931, 337), "%d damage   •   Range %s" % [night.attack_damage(active), weapon_range(active)], 17)
-	var y := 365
+	var y := 346
 	for slot: String in character.equipment:
 		var id: String = character.equipment[slot]
-		label_at(Vector2(931, y), "%s  /  %s" % [slot.capitalize(), Journey.GEAR[id].name], 16, PAPER)
-		y += 23
+		draw_hud_frame(Rect2(930, y, 321, 25), Color("#242229"))
+		draw_gear_icon(slot, Vector2(947, y + 12))
+		label_at(Vector2(966, y + 18), "%s  /  %s" % [slot.capitalize(), Journey.GEAR[id].name], 15, PAPER)
+		y += 27
+	if active == night.priest:
+		label_at(Vector2(931, 434), "Heal +%d HP   •   Revive 1 AP" % night.heal_power(), 14, MUTED)
 	if character.shield_guard() > 0:
-		label_at(Vector2(931, 434), "Shield −%d   Armor −%d   Defend −%d extra" % [
+		label_at(Vector2(931, 447), "Shield −%d   Armor −%d   Defend −%d extra" % [
 			character.shield_guard(), character.armor_guard(), 1 + character.rank_of("guard")], 14, MUTED)
 
 func draw_sidebar() -> void:
@@ -1096,10 +1257,20 @@ func draw_day() -> void:
 	if day == Day.DAWN and not dawn_loot.is_empty():
 		label_at(Vector2(931, 449), "Salvaged %d items and 4 gold." % dawn_loot.size(), 16, GOLD)
 	elif day == Day.DUSK:
-		label_at(Vector2(931, 449), "Both heroes recover before nightfall.", 16, GOLD)
+		label_at(Vector2(931, 449), "The party recovers before nightfall.", 16, GOLD)
 	label_at(Vector2(20, 708), day_message, 17, PAPER)
 
+func bless(tile: Vector2i) -> void:
+	blessing_tile = tile
+	blessing_until = clock + 0.55
+
 func draw_effects() -> void:
+	if blessing_until > clock:
+		var strength := (blessing_until - clock) / 0.55
+		var at := center(blessing_tile) + Vector2(0, -8 - (1.0 - strength) * 20.0)
+		var light := Color(1.0, 0.84, 0.54, strength)
+		draw_line(at + Vector2(-6, 0), at + Vector2(6, 0), light, 2, true)
+		draw_line(at + Vector2(0, -6), at + Vector2(0, 6), light, 2, true)
 	if arrow_progress < 1.0:
 		var tip := arrow_from.lerp(arrow_to, arrow_progress)
 		var tail := arrow_from.lerp(arrow_to, maxf(0.0, arrow_progress - 0.15))

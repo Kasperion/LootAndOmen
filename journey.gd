@@ -2,6 +2,7 @@ extends RefCounted
 
 const CAMPS := ["Pine Hollow", "Stoneford"]
 const GEAR := {
+	"pilgrim_mace": {"name": "Pilgrim Mace", "slot": "mace", "min": 1, "max": 1, "damage": 3, "price": 0},
 	"hunting_bow": {"name": "Hunting Bow", "slot": "bow", "min": 2, "max": 5, "damage": 2, "price": 0},
 	"war_bow": {"name": "War Bow", "slot": "bow", "min": 2, "max": 6, "damage": 3, "price": 8},
 	"longbow": {"name": "Longbow", "slot": "bow", "min": 2, "max": 7, "damage": 2, "price": 7},
@@ -14,6 +15,7 @@ const GEAR := {
 	"reinforced_shield": {"name": "Reinforced Shield", "slot": "shield", "guard": 2, "price": 7},
 }
 const UPGRADES := {
+	"heal": ["Merciful Light", "+1 HP restored by Heal", 3],
 	"range": ["Bow Range", "+1 maximum bow range, up to 8 total", 3],
 	"move": ["Trail Runner", "+1 movement each turn", 3],
 	"pin": ["Pinning Shot", "Unlock a bow attack that slows a survivor", 1],
@@ -37,7 +39,7 @@ class Character:
 		title = hero_name
 		base_hp = health
 		equipment = slots
-		weapon_slot = "bow" if slots.has("bow") else "sword"
+		weapon_slot = String(slots.keys()[0])
 		upgrades = options
 
 	func xp_goal() -> int:
@@ -88,6 +90,8 @@ var ranger := Character.new("Ranger", 12, {"bow": "hunting_bow", "armor": "trave
 	["range", "move", "pin", "damage", "health"])
 var knight := Character.new("Knight", 18, {"sword": "short_sword", "shield": "militia_shield", "armor": "ringmail"},
 	["damage", "guard", "health", "move"])
+var priest := Character.new("Priest", 14, {"mace": "pilgrim_mace", "armor": "travel_coat"},
+	["heal", "health", "move", "damage"])
 var site := 0
 var gold := 4
 var inventory: Array[String] = []

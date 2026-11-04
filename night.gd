@@ -99,6 +99,7 @@ var turn := 1
 var journey: Journey
 var ranger: Hero
 var knight: Hero
+var priest: Hero
 var heroes: Array[Hero] = []
 var fire_hp := MAX_FIRE_HP
 var kills := 0
@@ -116,7 +117,8 @@ func _init(run: Journey = null) -> void:
 	journey = run if run != null else Journey.new()
 	ranger = Hero.new(journey.ranger, FIRE + Vector2i.DOWN)
 	knight = Hero.new(journey.knight, FIRE + Vector2i.UP)
-	heroes.assign([ranger, knight])
+	priest = Hero.new(journey.priest, FIRE + Vector2i.LEFT)
+	heroes.assign([ranger, knight, priest])
 	rocks = ROCKS if journey.site == 0 else STONEFORD_ROCKS
 	trees = PINE_TREES if journey.site == 0 else FORD_TREES
 	cliffs = PINE_CLIFFS if journey.site == 0 else FORD_CLIFFS
@@ -294,16 +296,58 @@ func attack(hero: Hero, tile: Vector2i, pin: bool = false) -> bool:
 	var damage := attack_damage(hero)
 	enemy.pinned = enemy.pinned or pin
 	damage_enemy(enemy, damage, hero)
-	var attack_name := "Sword strike" if hero == knight else ("Pinning Shot" if pin else "Bow shot")
+	var attack_name := "Pinning Shot" if pin else {"Knight": "Sword strike", "Priest": "Mace strike", "Ranger": "Bow shot"}[hero.title] as String
 	message = "%s dealt %d damage." % [attack_name, damage]
 	if enemy.hp <= 0:
 		message += " %s earned 4 XP." % hero.title
 	finish_wave_if_clear()
 	return true
 
+func fallen_at(tile: Vector2i) -> Hero:
+	for hero: Hero in heroes:
+		if hero.hp == 0 and hero.tile == tile:
+			return hero
+	return null
+
+func revive_cost(hero: Hero) -> int:
+	return 1 if hero == priest else 2
+
+func can_revive(hero: Hero, target: Hero) -> bool:
+	return phase == Phase.PLAYER and hero.hp > 0 and target != null and target.hp == 0 \
+		and distance(hero.tile, target.tile) == 1 and hero.ap >= revive_cost(hero) \
+		and hero_at(target.tile) == null and enemy_at(target.tile) == null and not is_structure(target.tile)
+
+func revive(hero: Hero, target: Hero) -> bool:
+	if not can_revive(hero, target):
+		return false
+	hero.ap -= revive_cost(hero)
+	target.hp = 1
+	target.ap = 0
+	target.movement = 0
+	target.attacks = 0
+	target.prepared = false
+	message = "%s revived %s at 1 HP." % [hero.title, target.title]
+	return true
+
+func heal_power() -> int:
+	return 3 + priest.character.rank_of("heal")
+
+func can_heal(target: Hero) -> bool:
+	return phase == Phase.PLAYER and priest.hp > 0 and priest.ap > 0 and target != null \
+		and target.hp > 0 and target.hp < max_health(target) and distance(priest.tile, target.tile) <= 1
+
+func heal(target: Hero) -> bool:
+	if not can_heal(target):
+		return false
+	var restored := mini(heal_power(), max_health(target) - target.hp)
+	priest.ap -= 1
+	target.hp += restored
+	message = "The Priest restored %d HP to %s." % [restored, target.title]
+	return true
+
 func can_prepare(hero: Hero) -> bool:
 	return phase == Phase.PLAYER and hero.hp > 0 and hero.ap > 0 and not hero.prepared \
-		and (hero == knight or hero.attacks > 0)
+		and (hero == knight or (hero == ranger and hero.attacks > 0))
 
 func prepare(hero: Hero) -> bool:
 	if not can_prepare(hero):
@@ -386,15 +430,17 @@ func finish_wave_if_clear() -> bool:
 	supplies += 4
 	if wave == spawns.size():
 		phase = Phase.VICTORY
-		message = "Dawn breaks. Both heroes gained 6 XP and the camp gained 4 supplies."
+		message = "Dawn breaks. The party gained 6 XP and the camp gained 4 supplies."
 	else:
 		phase = Phase.BUILD
-		message = "Wave cleared. Both heroes gained 6 XP. The camp gained 4 supplies."
+		message = "Wave cleared. The party gained 6 XP. The camp gained 4 supplies."
 	return true
 
 func finish_if_lost() -> bool:
-	if fire_hp > 0 and (ranger.hp > 0 or knight.hp > 0):
-		return false
+	if fire_hp > 0:
+		for hero: Hero in heroes:
+			if hero.hp > 0:
+				return false
 	phase = Phase.DEFEAT
 	message = "The fire went out." if fire_hp <= 0 else "The party fell."
 	return true
@@ -529,8 +575,8 @@ func step_enemy(enemy: Enemy, tile: Vector2i) -> bool:
 	return true
 
 func enemy_target(enemy: Enemy, from: Vector2i) -> Vector2i:
-	# The Knight intercepts when both heroes are adjacent.
-	for hero: Hero in [knight, ranger]:
+	# The Knight intercepts when multiple heroes are adjacent.
+	for hero: Hero in [knight, ranger, priest]:
 		if hero.hp > 0 and footprint_distance(from, enemy.size, hero.tile) == 1:
 			return hero.tile
 	return FIRE if footprint_distance(from, enemy.size, FIRE) == 1 else NO_TILE
