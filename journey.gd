@@ -3,9 +3,9 @@ extends RefCounted
 const CAMPS := ["Pine Hollow", "Stoneford"]
 const GEAR := {
 	"pilgrim_mace": {"name": "Pilgrim Mace", "slot": "mace", "min": 1, "max": 1, "damage": 3, "price": 0},
-	"hunting_bow": {"name": "Hunting Bow", "slot": "bow", "min": 1, "max": 5, "damage": 2, "price": 0},
-	"war_bow": {"name": "War Bow", "slot": "bow", "min": 1, "max": 6, "damage": 3, "price": 8},
-	"longbow": {"name": "Longbow", "slot": "bow", "min": 1, "max": 7, "damage": 2, "price": 7},
+	"hunting_bow": {"name": "Hunting Bow", "slot": "bow", "min": 2, "max": 5, "damage": 2, "price": 0},
+	"war_bow": {"name": "War Bow", "slot": "bow", "min": 2, "max": 6, "damage": 3, "price": 8},
+	"longbow": {"name": "Longbow", "slot": "bow", "min": 2, "max": 7, "damage": 2, "price": 7},
 	"travel_coat": {"name": "Travel Coat", "slot": "armor", "health": 0, "price": 0},
 	"quilted_coat": {"name": "Quilted Coat", "slot": "armor", "health": 2, "price": 3},
 	"short_sword": {"name": "Short Sword", "slot": "sword", "min": 1, "max": 1, "damage": 5, "price": 0},
@@ -16,7 +16,7 @@ const GEAR := {
 }
 const UPGRADES := {
 	"heal": ["Merciful Light", "+1 HP restored by Heal", 3],
-	"range": ["Bow Range", "+1 maximum bow range, up to 8 total", 3],
+	"range": ["Bow Range", "+1 maximum bow range, up to 10 total", 3],
 	"move": ["Trail Runner", "+1 movement each turn", 3],
 	"pin": ["Pinning Shot", "Unlock a bow attack that slows a survivor", 1],
 	"health": ["Hardy", "+2 maximum and current HP", 3],
@@ -40,6 +40,8 @@ class Character:
 		base_hp = health
 		equipment = slots
 		weapon_slot = String(slots.keys()[0])
+		if not equipment.has("shield"):
+			equipment["shield"] = ""
 		upgrades = options
 
 	func xp_goal() -> int:
@@ -72,7 +74,7 @@ class Character:
 		return GEAR[equipment[weapon_slot]]
 
 	func max_range() -> int:
-		return mini(8, int(weapon().max) + rank_of("range"))
+		return mini(10, int(weapon().max) + rank_of("range"))
 
 	func max_health() -> int:
 		var armor: Dictionary = GEAR.get(equipment.get("armor", ""), {})
@@ -128,7 +130,11 @@ func equip(character: Character, index: int) -> bool:
 		return false
 	var id := inventory[index]
 	var slot: String = GEAR[id].slot
-	inventory[index] = character.equipment[slot]
+	var previous: String = character.equipment[slot]
+	if previous.is_empty():
+		inventory.remove_at(index)
+	else:
+		inventory[index] = previous
 	character.equipment[slot] = id
 	return true
 

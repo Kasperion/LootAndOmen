@@ -5,13 +5,22 @@ const Journey := preload("res://journey.gd")
 const CampAudio := preload("res://camp_audio.gd")
 const BoardArt := preload("res://board_art.gd")
 const TERRAIN := [preload("res://art/pine.svg"), preload("res://art/stoneford.svg")]
-enum Day { NIGHT, DAWN, MERCHANT, DUSK, COMPLETE }
+enum Day { NIGHT, DAWN, MERCHANT, DUSK, COMPLETE, ROAD }
+const TRAVEL_DURATION := 7.0
+const STASH_PAGE_SIZE := 7
+const ITEM_ATLAS := preload("res://art/heavy_ink/items.svg")
 enum Menu { CLOSED, MAIN, SETTINGS, RESTART }
 const SHOP := ["war_bow", "longbow", "iron_sword", "reinforced_shield"]
 const CELL := 58
 const BOARD := Vector2.ZERO
 const VIEW := Vector2(1280, 720)
 const SPRITES := {
+	"merchant": preload("res://art/heavy_ink/merchant.webp"),
+	"road": preload("res://art/heavy_ink/road.webp"),
+	"wagon": preload("res://art/heavy_ink/wagon.png"),
+	"horse_0": preload("res://art/heavy_ink/horse_0.png"),
+	"horse_1": preload("res://art/heavy_ink/horse_1.png"),
+	"horse_2": preload("res://art/heavy_ink/horse_2.png"),
 	"fire_0": preload("res://art/heavy_ink/fire_0.png"),
 	"fire_1": preload("res://art/heavy_ink/fire_1.png"),
 	"fire_2": preload("res://art/heavy_ink/fire_2.png"),
@@ -58,6 +67,9 @@ var night := Night.new(journey)
 var active: Night.Hero
 var night_shade: ImageTexture
 var day := Day.NIGHT
+var travel_elapsed := 0.0
+var stash_page := 0
+var dusk_equipment := false
 var menu := Menu.CLOSED
 var audio := CampAudio.new()
 var sliders: Dictionary = {}
@@ -156,14 +168,17 @@ func _ready() -> void:
 		var choice: Button = buttons["upgrade%d" % i]
 		choice.size.y = 54
 		choice.add_theme_font_size_override("font_size", 15)
-	for i in 8:
-		make_button("equip%d" % i, "Equip", Vector2(475, 200 + 45 * i), 95, equip.bind(i))
-		make_button("sell%d" % i, "Sell", Vector2(580, 200 + 45 * i), 115, sell.bind(i))
+	for i in STASH_PAGE_SIZE:
+		make_button("equip%d" % i, "Equip", Vector2(695, 258 + 49 * i), 80, equip_visible.bind(i))
+		make_button("sell%d" % i, "Sell", Vector2(784, 258 + 49 * i), 102, sell_visible.bind(i))
+	make_button("dusk_equipment", "Manage Equipment", Vector2(935, 590), 328, toggle_dusk_equipment)
+	make_button("stash_prev", "Previous", Vector2(451, 611), 100, page_stash.bind(-1))
+	make_button("stash_next", "Next", Vector2(786, 611), 100, page_stash.bind(1))
 	for i in SHOP.size():
 		var id: String = SHOP[i]
 		var item: Dictionary = Journey.GEAR[id]
-		make_button("buy_" + id, "%s [%dg]" % [item.name, item.price],
-			Vector2(754 + (i % 2) * 165, 429 + (i / 2) * 46), 158, buy.bind(id))
+		make_button("buy_" + id, "Buy [%dg]" % item.price,
+			Vector2(322, 258 + i * 49), 101, buy.bind(id))
 		buttons["buy_" + id].tooltip_text = Journey.item_stats(id)
 	restart()
 
@@ -220,6 +235,7 @@ func restart() -> void:
 	menu = Menu.CLOSED
 	journey = Journey.new()
 	day = Day.NIGHT
+	stash_page = 0
 	begin_night()
 
 func begin_night(supplies: int = 0) -> void:
@@ -394,28 +410,54 @@ func close_defense() -> void:
 	inspected_defense = Vector2i(-1, -1)
 	refresh()
 
+func stash_pages() -> int:
+	return maxi(1, ceili(float(journey.inventory.size()) / STASH_PAGE_SIZE))
+
+func page_stash(direction: int) -> void:
+	stash_page = clampi(stash_page + direction, 0, stash_pages() - 1)
+	refresh()
+
+func equip_visible(row: int) -> void:
+	equip(stash_page * STASH_PAGE_SIZE + row)
+
+func sell_visible(row: int) -> void:
+	sell(stash_page * STASH_PAGE_SIZE + row)
+
+func toggle_dusk_equipment() -> void:
+	dusk_equipment = not dusk_equipment
+	refresh()
+
 func refresh_day() -> void:
+	buttons.dusk_equipment.visible = day == Day.DUSK
+	buttons.dusk_equipment.text = "Return to Road" if dusk_equipment else "Manage Equipment"
+	if day == Day.ROAD or (day == Day.DUSK and not dusk_equipment):
+		for i in night.heroes.size():
+			buttons["hero%d" % i].hide()
+		buttons.advance.visible = day == Day.DUSK
+		buttons.advance.text = "Set Up Camp at Dusk"
+		return
 	buttons.advance.text = ["", "Follow the Road", "Continue to Stoneford",
 		"Set Up Camp at Dusk", "Journey Complete"][day]
 	if day == Day.DAWN and journey.site == 1:
 		buttons.advance.text = "Finish the Journey"
 	buttons.advance.disabled = day == Day.COMPLETE
-	for i in journey.inventory.size():
-		var id := journey.inventory[i]
+	stash_page = mini(stash_page, stash_pages() - 1)
+	var first := stash_page * STASH_PAGE_SIZE
+	for i in mini(STASH_PAGE_SIZE, journey.inventory.size() - first):
+		var index := first + i
+		var id := journey.inventory[index]
 		var equip_button: Button = buttons["equip%d" % i]
-		equip_button.text = "Equip"
-		equip_button.disabled = not journey.can_equip(active.character, i)
-		var equipped: String = active.character.equipment.get(Journey.GEAR[id].slot, "")
-		if not equip_button.disabled:
-			equip_button.tooltip_text = "%s: %s\nEquipped %s: %s" % [
-				Journey.GEAR[id].name, Journey.item_stats(id), Journey.GEAR[equipped].name, Journey.item_stats(equipped)]
-		else:
-			equip_button.tooltip_text = "The %s cannot use this item or already has one equipped." % active.title
+		equip_button.disabled = not journey.can_equip(active.character, index)
+		equip_button.tooltip_text = Journey.item_stats(id)
 		equip_button.show()
-		if journey.can_sell(i):
+		if journey.can_sell(index):
 			var sell_button: Button = buttons["sell%d" % i]
-			sell_button.text = "Sell  [%dg]" % journey.sell_price(id)
+			sell_button.text = "Sell [%dg]" % journey.sell_price(id)
 			sell_button.show()
+	buttons.stash_prev.visible = stash_pages() > 1
+	buttons.stash_prev.disabled = stash_page == 0
+	buttons.stash_next.visible = stash_pages() > 1
+	buttons.stash_next.disabled = stash_page + 1 >= stash_pages()
 	for id: String in SHOP:
 		var button: Button = buttons["buy_" + id]
 		button.visible = day == Day.MERCHANT and id in journey.stock
@@ -504,8 +546,10 @@ func advance_day() -> void:
 				day_message = "Both nights survived. The caravan travels onward."
 		Day.MERCHANT:
 			journey.trading = false
-			day = Day.DUSK
-			day_message = "The road reaches Stoneford as the light fades."
+			day = Day.ROAD
+			dusk_equipment = false
+			travel_elapsed = 0.0
+			day_message = "On the road to Stoneford."
 		Day.DUSK:
 			journey.daylight = false
 			journey.site += 1
@@ -520,6 +564,12 @@ func choose_build(kind: String) -> void:
 
 func _process(delta: float) -> void:
 	clock += delta
+	if day == Day.ROAD and menu == Menu.CLOSED:
+		travel_elapsed = minf(TRAVEL_DURATION, travel_elapsed + delta)
+		if travel_elapsed >= TRAVEL_DURATION:
+			day = Day.DUSK
+			day_message = "The caravan reaches Stoneford as the light fades."
+			refresh()
 	var hovered := tile_at(screen_to_world(get_local_mouse_position()))
 	if hovered != intent_tile:
 		update_intent(hovered)
@@ -1093,6 +1143,20 @@ func draw_unit(key: String, at: Vector2, side: float, actor: Variant, hit: bool,
 	if key == "priest" and heal_cast_until > clock:
 		texture = SPRITES["priest_cast_high" if heal_cast_until - clock < 0.44 else "priest_cast_low"]
 	var rect := sprite_rect(texture, at + offset, side)
+	# Keep the planted feet fixed while compensating for the extra padding in action art.
+	var pose_fit := Vector2.ONE
+	if texture == SPRITES.knight_guard:
+		pose_fit = Vector2(1.31, 0.844)
+	elif texture == SPRITES.ranger_watch:
+		pose_fit = Vector2(1.23, 0.888)
+	elif texture == SPRITES.priest_cast_low:
+		pose_fit = Vector2(1.19, 0.894)
+	elif texture == SPRITES.priest_cast_high:
+		pose_fit = Vector2(1.15, 0.988)
+	if pose_fit != Vector2.ONE:
+		var foot := at.y + offset.y + side * 0.48
+		rect.size *= pose_fit.x
+		rect.position = Vector2(at.x + offset.x - rect.size.x * 0.5, foot - rect.size.y * pose_fit.y)
 	if actor == active and not dead:
 		var mask := silhouette(texture)
 		for i in 12:
@@ -1192,24 +1256,6 @@ func draw_hud_frame(rect: Rect2, fill: Color, border := Color("#8a7257")) -> voi
 			draw_line(corner, corner + Vector2(8 * inside.x, 0), border, 2)
 			draw_line(corner, corner + Vector2(0, 8 * inside.y), border, 2)
 
-func draw_gear_icon(slot: String, at: Vector2) -> void:
-	match slot:
-		"bow":
-			draw_arc(at + Vector2(-4, 0), 8, -1.05, 1.05, 10, GOLD, 2.5, true)
-			draw_line(at + Vector2(0, -7), at + Vector2(0, 7), PAPER, 1)
-		"shield":
-			polygon(at, [Vector2(-6, -7), Vector2(6, -7), Vector2(5, 3), Vector2(0, 8), Vector2(-5, 3)], GOLD)
-			draw_line(at + Vector2(0, -5), at + Vector2(0, 5), INK, 2)
-		"armor":
-			polygon(at, [Vector2(-7, -6), Vector2(-3, -8), Vector2(0, -4), Vector2(3, -8),
-				Vector2(7, -6), Vector2(5, 7), Vector2(-5, 7)], GOLD)
-		_:
-			draw_line(at + Vector2(-5, 6), at + Vector2(5, -7), PAPER, 2.5, true)
-			if slot == "mace":
-				draw_circle(at + Vector2(5, -6), 3.5, GOLD)
-			else:
-				draw_line(at + Vector2(-7, 1), at + Vector2(-1, 6), GOLD, 2)
-
 func health_color(ratio: float) -> Color:
 	if ratio <= 0.0:
 		return Color("#100e12")
@@ -1256,17 +1302,26 @@ func draw_loadout() -> void:
 	label_at(Vector2(931, 312), "%s   •   XP %d / %d" % [active.title, character.xp, character.xp_goal()], 17, TEAL)
 	label_at(Vector2(931, 337), "%d damage   •   Range %s" % [night.attack_damage(active), weapon_range(active)], 17)
 	var y := 346
+	var hovered_id := ""
 	for slot: String in character.equipment:
 		var id: String = character.equipment[slot]
-		draw_hud_frame(Rect2(930, y, 321, 25), Color("#242229"))
-		draw_gear_icon(slot, Vector2(947, y + 12))
-		label_at(Vector2(966, y + 18), "%s  /  %s" % [slot.capitalize(), Journey.GEAR[id].name], 15, PAPER)
+		var rect := Rect2(930, y, 321, 25)
+		draw_item_row(rect, id, slot.capitalize() + "  /  ")
+		if rect.has_point(get_local_mouse_position()):
+			hovered_id = id
 		y += 27
+	if not hovered_id.is_empty() and menu == Menu.CLOSED:
+		var tooltip := Rect2(637, 346, 282, 55)
+		draw_hud_frame(tooltip, Color("#221b21"), GOLD)
+		label_at(tooltip.position + Vector2(10, 20), Journey.GEAR[hovered_id].name, 15, GOLD)
+		label_at(tooltip.position + Vector2(10, 42), Journey.item_stats(hovered_id), 14)
 	if active == night.priest:
 		label_at(Vector2(931, 434), "Heal +%d HP   •   Revive 1 AP" % night.heal_power(), 14, MUTED)
-	if character.shield_guard() > 0:
-		label_at(Vector2(931, 447), "Shield −%d   Armor −%d   Defend −%d extra" % [
-			character.shield_guard(), character.armor_guard(), 1 + character.rank_of("guard")], 14, MUTED)
+	if character.shield_guard() > 0 or character.armor_guard() > 0:
+		var protection := "Shield −%d   Armor −%d" % [character.shield_guard(), character.armor_guard()]
+		if active == night.knight:
+			protection += "   Defend −%d extra" % (1 + character.rank_of("guard"))
+		label_at(Vector2(931, 447), protection, 14, MUTED)
 
 func draw_sidebar() -> void:
 	draw_party()
@@ -1288,32 +1343,90 @@ func draw_sidebar() -> void:
 					active.attacks, night.attack_limit(active)], 15, MUTED)
 	label_at(Vector2(20, 708), night.message, 17, PAPER)
 
+func draw_item_row(rect: Rect2, id: String, prefix := "", stats := false) -> void:
+	draw_hud_frame(rect, Color("#242229"))
+	if id.is_empty():
+		label_at(rect.position + Vector2(33, 18), prefix + "Empty", 15, MUTED)
+		return
+	var index := Journey.GEAR.keys().find(id)
+	var icon_side := 21.0 if not stats else 32.0
+	var icon := Rect2(rect.position + Vector2(4, (rect.size.y - icon_side) * 0.5), Vector2.ONE * icon_side)
+	draw_texture_rect_region(ITEM_ATLAS, icon, Rect2(index * 48, 0, 48, 48))
+	var text_x := 33 if not stats else 42
+	label_at(rect.position + Vector2(text_x, 18), prefix + Journey.GEAR[id].name, 15)
+	if stats:
+		label_at(rect.position + Vector2(text_x, 35), Journey.item_stats(id), 13, MUTED)
+
 func draw_day() -> void:
-	var titles := ["", "DAWN  /  BREAK CAMP", "DAY  /  ROADSIDE TRADER",
-		"DUSK  /  MAKE CAMP", "DAY  /  JOURNEY COMPLETE"]
+	if day == Day.ROAD or (day == Day.DUSK and not dusk_equipment):
+		draw_road()
+		return
+	var titles := ["", "DAWN  /  BREAK CAMP", "DAY  /  ROADSIDE TRADER", "DUSK  /  MAKE CAMP", "DAY  /  JOURNEY COMPLETE"]
 	label_at(Vector2(20, 27), titles[day], 16, GOLD)
 	label_at(Vector2(920, 27), "DAYLIGHT  /  SAFE TO EQUIP", 16, GOLD)
-	draw_rect(Rect2(32, 135, 690, 498), Color("#202b30"))
+	draw_hud_frame(Rect2(20, 48, 883, 615), HUD)
+	if day == Day.MERCHANT:
+		draw_texture_rect_region(SPRITES.merchant, Rect2(26, 54, 871, 160), Rect2(0, 25, 960, 176))
+		label_at(Vector2(35, 242), "MERCHANT WARES", 19, GOLD)
+		for i in SHOP.size():
+			var id: String = SHOP[i]
+			var y := 258 + i * 49
+			if id in journey.stock:
+				draw_item_row(Rect2(34, y, 281, 44), id, "", true)
+			else:
+				draw_item_row(Rect2(34, y, 281, 44), "", "Sold  /  ")
+	else:
+		label_at(Vector2(35, 90), "THE CARAVAN", 25, GOLD)
+		label_at(Vector2(35, 125), "Pine Hollow   →   Roadside trader   →   Stoneford", 17)
+		if day == Day.DAWN:
+			label_at(Vector2(35, 154), "Salvaged %d items and 4 gold." % dawn_loot.size(), 16, MUTED)
+	label_at(Vector2(451, 242), "CARAVAN STASH", 19, GOLD)
+	label_at(Vector2(804, 242), "%d GOLD" % journey.gold, 16, GOLD)
+	var first := stash_page * STASH_PAGE_SIZE
+	for i in mini(STASH_PAGE_SIZE, journey.inventory.size() - first):
+		draw_item_row(Rect2(451, 258 + i * 49, 236, 44), journey.inventory[first + i], "", true)
+	if journey.inventory.is_empty():
+		label_at(Vector2(451, 281), "The stash is empty.", 16, MUTED)
+	if stash_pages() > 1:
+		label_at(Vector2(643, 638), "%d / %d" % [stash_page + 1, stash_pages()], 16, GOLD)
 	draw_party()
 	draw_loadout()
-	label_at(Vector2(51, 169), "CARAVAN STASH", 20, GOLD)
-	label_at(Vector2(491, 169), "%d gold" % journey.gold, 20, GOLD)
-	for i in journey.inventory.size():
-		var id := journey.inventory[i]
-		var y := 200 + 45 * i
-		draw_line(Vector2(51, y), Vector2(459, y), Color("#43515b"))
-		label_at(Vector2(51, y + 18), Journey.GEAR[id].name, 17)
-		label_at(Vector2(51, y + 36), Journey.item_stats(id), 14, MUTED)
-	if journey.inventory.is_empty():
-		label_at(Vector2(51, 225), "The stash is empty. Equipped gear is shown in Party.", 16, MUTED)
-	label_at(Vector2(51, 588), "Pine Hollow   →   Roadside trader   →   Stoneford", 18, GOLD)
-	var route := ["", "Breaking camp at %s" % Journey.CAMPS[journey.site], "Trading on the road", "Arriving at Stoneford", "Both nights survived"]
-	label_at(Vector2(51, 612), route[day], 15, MUTED)
-	if day == Day.DAWN and not dawn_loot.is_empty():
-		label_at(Vector2(931, 449), "Salvaged %d items and 4 gold." % dawn_loot.size(), 16, GOLD)
-	elif day == Day.DUSK:
-		label_at(Vector2(931, 449), "The party recovers before nightfall.", 16, GOLD)
 	label_at(Vector2(20, 708), day_message, 17, PAPER)
+
+func draw_road() -> void:
+	var progress := clampf(travel_elapsed / TRAVEL_DURATION, 0.0, 1.0)
+	var time := travel_elapsed
+	draw_texture_rect(SPRITES.road, Rect2(-progress * 100, 0, 1380, 720), false)
+	var sun := Vector2(890 - progress * 75, lerpf(110, 310, progress))
+	draw_circle(sun, 41, Color(1, 0.55, 0.24, 0.16), true, -1, true)
+	draw_circle(sun, 30, Color("#f5a567"), true, -1, true)
+	draw_rect(Rect2(0, 0, 1280, 720), Color(0.13, 0.08, 0.21, 0.48 * progress))
+	for i in 5:
+		var x := fposmod(i * 330.0 - time * (56.0 + (i % 2) * 27.0), 1650.0) - 120.0
+		draw_sprite("tree", Vector2(x, 420 + (i % 2) * 40), 220.0 + (i % 2) * 55,
+			Color("#9f807b").darkened(progress * 0.26))
+	var wagon := Vector2(475 + progress * 116, 558)
+	draw_sprite("wagon", wagon, 235.0)
+	draw_wheel(wagon + Vector2(-65, 49), time, 25.0)
+	draw_wheel(wagon + Vector2(18, 49), time, 25.0)
+	var gait := [0, 1, 2, 1]
+	var step: int = gait[int(time * 8.0) % gait.size()] if day == Day.ROAD else 0
+	draw_sprite("horse_%d" % step, wagon + Vector2(178, 7), 166.0)
+	draw_hud_frame(Rect2(22, 23, 415, 67), Color("#231d24"))
+	label_at(Vector2(38, 49), "THE ROAD TO STONEFORD", 21, GOLD)
+	label_at(Vector2(38, 73), "The sun is setting" if day == Day.ROAD else "Arrived at dusk", 16)
+	draw_rect(Rect2(24, 674, 416, 8), Color("#211a22"))
+	draw_rect(Rect2(24, 674, 416 * progress, 8), GOLD)
+	label_at(Vector2(24, 709), day_message, 17)
+
+func draw_wheel(at: Vector2, time: float, radius: float) -> void:
+	draw_circle(at, radius, Color("#211719"), true, -1, true)
+	draw_circle(at, radius - 5, Color("#614132"), true, -1, true)
+	for i in 8:
+		var edge := Vector2.from_angle(i * TAU / 8.0 + time * 4.2) * (radius - 4)
+		draw_line(at, at + edge, Color("#c18a57"), 2.5, true)
+	draw_arc(at, radius - 1, 0, TAU, 32, Color("#84614a"), 2, true)
+	draw_circle(at, 5, Color("#302229"), true, -1, true)
 
 func bless(tile: Vector2i) -> void:
 	blessing_tile = tile
