@@ -15,8 +15,9 @@ const AFFIXES := {
 }
 const SLOT_AFFIXES := {
 	"bow": ["keen", "farshot"], "mace": ["keen"], "sword": ["keen"],
-	"armor": ["stout", "warded"], "shield": ["stout", "warded"],
+	"armor": ["stout", "warded"],
 }
+const SHOP := ["war_bow", "longbow", "iron_sword", "trail_charm"]
 const GEAR := {
 	"pilgrim_mace": {"name": "Pilgrim Mace", "slot": "mace", "min": 1, "max": 1, "damage": 3, "price": 0},
 	"hunting_bow": {"name": "Hunting Bow", "slot": "bow", "min": 2, "max": 5, "damage": 2, "price": 0},
@@ -26,9 +27,11 @@ const GEAR := {
 	"quilted_coat": {"name": "Quilted Coat", "slot": "armor", "health": 2, "price": 3},
 	"short_sword": {"name": "Short Sword", "slot": "sword", "min": 1, "max": 1, "damage": 5, "price": 0},
 	"iron_sword": {"name": "Iron Sword", "slot": "sword", "min": 1, "max": 1, "damage": 6, "price": 8},
-	"militia_shield": {"name": "Militia Shield", "slot": "shield", "guard": 1, "price": 0},
 	"ringmail": {"name": "Ringmail", "slot": "armor", "guard": 1, "price": 0},
-	"reinforced_shield": {"name": "Reinforced Shield", "slot": "shield", "guard": 2, "price": 7},
+	"trail_charm": {"name": "Trail Charm", "slot": "trinket", "movement": 1, "price": 6,
+		"effect": "+1 movement each turn"},
+	"ember_charm": {"name": "Ember Charm", "slot": "trinket", "wave_heal": 2, "price": 6,
+		"effect": "Recover 2 HP on wave clear", "rarity": Rarity.RARE},
 }
 const UPGRADES := {
 	"heal": ["Merciful Light", "+1 HP restored by Heal", 3],
@@ -37,7 +40,7 @@ const UPGRADES := {
 	"pin": ["Pinning Shot", "Unlock a bow attack that slows an enemy", 1],
 	"health": ["Hardy", "+2 maximum and current HP", 3],
 	"damage": ["Weapon Mastery", "+1 damage on weapon attacks", 3],
-	"guard": ["Shield Drill", "+1 damage reduction when using Defend", 3],
+	"guard": ["Parry Drill", "+1 damage reduction when using Parry", 3],
 }
 const ROMAN := ["I", "II", "III"]
 
@@ -92,35 +95,38 @@ class Character:
 
 	func max_health() -> int:
 		var armor := LootJourney.item_data(equipment.get("armor", ""))
-		var shield := LootJourney.item_data(equipment.get("shield", ""))
-		return base_hp + rank_of("health") * 2 + armor.get("health", 0) + shield.get("health", 0)
+		return base_hp + rank_of("health") * 2 + armor.get("health", 0)
 
 	func armor_guard() -> int:
 		var armor := LootJourney.item_data(equipment.get("armor", ""))
 		return armor.get("guard", 0)
 
-	func shield_guard() -> int:
-		var shield := LootJourney.item_data(equipment.get("shield", ""))
-		return shield.get("guard", 0)
+	func trinket() -> Dictionary:
+		return LootJourney.item_data(equipment.get("trinket", ""))
 
-var ranger := Character.new("Ranger", 12, {"bow": "hunting_bow", "armor": "travel_coat"},
+var ranger := Character.new("Ranger", 12, {"bow": "hunting_bow", "armor": "travel_coat", "trinket": ""},
 	["range", "move", "pin", "damage", "health"])
-var knight := Character.new("Knight", 18, {"sword": "short_sword", "shield": "militia_shield", "armor": "ringmail"},
+var knight := Character.new("Knight", 18, {"sword": "short_sword", "armor": "ringmail", "trinket": ""},
 	["damage", "guard", "health", "move"])
-var priest := Character.new("Priest", 14, {"mace": "pilgrim_mace", "armor": "travel_coat", "shield": ""},
+var priest := Character.new("Priest", 14, {"mace": "pilgrim_mace", "armor": "travel_coat", "trinket": ""},
 	["heal", "health", "move", "damage"])
 var site := 0
 var gold := 4
 var inventory: Array[String] = []
-var stock: Array[String] = ["war_bow", "longbow", "iron_sword", "reinforced_shield"]
+var stock: Array[String] = []
 var daylight := false
 var trading := false
+
+func _init() -> void:
+	stock.assign(SHOP)
 
 static func upgrade_name(id: String, rank: int) -> String:
 	var info: Array = UPGRADES[id]
 	return info[0] if info[2] == 1 else "%s %s" % [info[0], ROMAN[rank - 1]]
 
 static func roll_loot(base_id: String, boss: bool) -> String:
+	if GEAR[base_id].slot == "trinket":
+		return base_id
 	var roll := randf()
 	if boss and roll < LEGENDARY_CHANCE:
 		return base_id + ":mawforged"
@@ -142,7 +148,7 @@ static func item_data(id: String) -> Dictionary:
 		return {}
 	var item: Dictionary = GEAR[parts[0]].duplicate()
 	item["base_id"] = parts[0]
-	item["rarity"] = Rarity.UNCOMMON if item.price > 0 else Rarity.COMMON
+	item["rarity"] = item.get("rarity", Rarity.UNCOMMON if item.price > 0 else Rarity.COMMON)
 	if parts.size() == 1:
 		return item
 	var bonus: Dictionary
@@ -162,6 +168,8 @@ static func item_data(id: String) -> Dictionary:
 
 static func item_stats(id: String) -> String:
 	var item := item_data(id)
+	if item.has("effect"):
+		return item.effect
 	if item.has("damage"):
 		var range_text := str(item.min) if item.min == item.max else "%d–%d" % [item.min, mini(10, item.max)]
 		var detail := "%d dmg  •  %s range" % [item.damage, range_text]

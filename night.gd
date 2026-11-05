@@ -149,7 +149,7 @@ func max_health(hero: Hero) -> int:
 	return hero.character.max_health()
 
 func movement_limit(hero: Hero) -> int:
-	return 3 + hero.character.rank_of("move")
+	return 3 + hero.character.rank_of("move") + hero.character.trinket().get("movement", 0)
 
 func attack_limit(hero: Hero) -> int:
 	return 2 if hero == ranger else 1
@@ -362,7 +362,7 @@ func prepare(hero: Hero) -> bool:
 		hero.attacks -= 1
 		message = "Overwatch armed. Fires once when a creature moves within bow range."
 	else:
-		message = "Defend ready. Extra shield reduction applies to the next melee hit."
+		message = "Parry ready. The Knight will reduce the next melee hit."
 	return true
 
 func can_overwatch(enemy: Enemy) -> bool:
@@ -395,10 +395,10 @@ func damage_enemy(enemy: Enemy, amount: int, killer: Hero = null) -> void:
 			var recovery: int = killer.character.weapon().get("kill_heal", 0)
 			killer.hp = mini(max_health(killer), killer.hp + recovery)
 		if enemy.kind == "boss":
-			var boss_gear := ["war_bow", "iron_sword", "pilgrim_mace", "quilted_coat", "reinforced_shield"]
+			var boss_gear := ["war_bow", "iron_sword", "pilgrim_mace", "quilted_coat", "ringmail"]
 			drop_gear(enemy.tile, Journey.roll_loot(boss_gear.pick_random(), true))
 		if kills == 1 or kills == 4:
-			var items := [["longbow", "quilted_coat"], ["iron_sword", "reinforced_shield"]]
+			var items := [["longbow", "quilted_coat"], ["iron_sword", "ember_charm"]]
 			var id: String = items[journey.site][0 if kills == 1 else 1]
 			drop_gear(enemy.tile, Journey.roll_loot(id, false))
 
@@ -436,6 +436,9 @@ func finish_wave_if_clear() -> bool:
 		return false
 	for hero: Hero in heroes:
 		hero.character.xp += 6
+		if hero.hp > 0:
+			var recovery: int = hero.character.trinket().get("wave_heal", 0)
+			hero.hp = mini(max_health(hero), hero.hp + recovery)
 	supplies += 4
 	if wave == spawns.size():
 		phase = Phase.VICTORY
@@ -590,7 +593,7 @@ func enemy_target(enemy: Enemy, from: Vector2i) -> Vector2i:
 func attack_enemy_target(enemy: Enemy, target: Vector2i) -> void:
 	var hero := hero_at(target)
 	if hero != null:
-		var reduction := hero.character.shield_guard() + hero.character.armor_guard()
+		var reduction := hero.character.armor_guard()
 		if hero == knight and hero.prepared:
 			reduction += 1 + hero.character.rank_of("guard")
 			hero.prepared = false
