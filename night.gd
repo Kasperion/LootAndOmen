@@ -45,12 +45,6 @@ const PINE_TREES := [Vector2i(2, 1), Vector2i(3, 2), Vector2i(8, 2), Vector2i(11
 const FORD_TREES := [Vector2i(2, 2), Vector2i(4, 4), Vector2i(8, 3), Vector2i(12, 4),
 	Vector2i(17, 1), Vector2i(17, 9), Vector2i(4, 10), Vector2i(8, 12), Vector2i(12, 11),
 	Vector2i(15, 10), Vector2i(19, 12), Vector2i(1, 3)]
-const PINE_CLIFFS := [Vector2i(0, 10), Vector2i(0, 11), Vector2i(0, 12), Vector2i(0, 13), Vector2i(0, 14),
-	Vector2i(1, 13), Vector2i(1, 14), Vector2i(2, 14), Vector2i(3, 14), Vector2i(4, 14),
-	Vector2i(17, 0), Vector2i(18, 0), Vector2i(19, 0), Vector2i(20, 0), Vector2i(20, 1)]
-const FORD_CLIFFS := [Vector2i(0, 0), Vector2i(1, 0), Vector2i(2, 0), Vector2i(3, 0), Vector2i(4, 0),
-	Vector2i(0, 1), Vector2i(0, 2), Vector2i(1, 1), Vector2i(19, 13), Vector2i(20, 13),
-	Vector2i(17, 14), Vector2i(18, 14), Vector2i(19, 14), Vector2i(20, 14), Vector2i(20, 12)]
 const DIRECTIONS := [Vector2i.RIGHT, Vector2i.DOWN, Vector2i.LEFT, Vector2i.UP]
 const BUILD_COST := {"Wall": 2, "Ballista": 3}
 const STRUCTURE_HP := {"Wall": 5, "Ballista": 4}
@@ -106,7 +100,6 @@ var kills := 0
 var loot: Dictionary = {}
 var rocks: Array
 var trees: Array
-var cliffs: Array
 var spawns: Array
 var supplies := 0
 var enemies: Array[Enemy] = []
@@ -121,7 +114,6 @@ func _init(run: Journey = null) -> void:
 	heroes.assign([ranger, knight, priest])
 	rocks = ROCKS if journey.site == 0 else STONEFORD_ROCKS
 	trees = PINE_TREES if journey.site == 0 else FORD_TREES
-	cliffs = PINE_CLIFFS if journey.site == 0 else FORD_CLIFFS
 	spawns = SPAWNS if journey.site == 0 else STONEFORD_SPAWNS
 
 func start_wave() -> void:
@@ -193,7 +185,7 @@ func is_structure(tile: Vector2i) -> bool:
 	return defenses.has(tile) and STRUCTURE_HP.has(defenses[tile].kind)
 
 func is_terrain_blocked(tile: Vector2i) -> bool:
-	return tile in rocks or tile in trees or tile in cliffs
+	return tile in rocks or tile in trees
 
 func structure_max_hp(piece: Dictionary) -> int:
 	return STRUCTURE_HP[piece.kind] + (piece.level - 1) * 3 if piece.kind == "Wall" else STRUCTURE_HP[piece.kind]
