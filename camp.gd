@@ -4,12 +4,14 @@ const Night := preload("res://night.gd")
 const Journey := preload("res://journey.gd")
 const CampAudio := preload("res://camp_audio.gd")
 const BoardArt := preload("res://board_art.gd")
-const TERRAIN := [preload("res://art/pine.svg"), preload("res://art/stoneford.svg")]
+const TERRAIN := [preload("res://art/heavy_ink/pine_ground.webp"), preload("res://art/heavy_ink/stoneford_ground.webp")]
 enum Day { NIGHT, DAWN, MERCHANT, DUSK, COMPLETE, ROAD }
 const TRAVEL_DURATION := 7.0
 const STASH_PAGE_SIZE := 7
 const ITEM_ATLAS := preload("res://art/heavy_ink/items.svg")
-const PARTY_PANEL := preload("res://art/heavy_ink/party_panel.webp")
+const FRAME_TEXTURE := preload("res://art/heavy_ink/party_panel.webp")
+const TITLE_FONT := preload("res://art/fonts/SpectralSC-SemiBold.ttf")
+const UI_FONT := preload("res://art/fonts/AlegreyaSans-Medium.ttf")
 const PARTY_SECTION := Color(0.16, 0.12, 0.11, 0.75)
 enum Menu { CLOSED, MAIN, SETTINGS, RESTART }
 const SHOP := Journey.SHOP
@@ -21,6 +23,8 @@ const SPRITES := {
 	"merchant": preload("res://art/heavy_ink/merchant.webp"),
 	"road": preload("res://art/heavy_ink/road.webp"),
 	"wagon": preload("res://art/heavy_ink/wagon.png"),
+	"wagon_wheel": preload("res://art/heavy_ink/wagon_wheel.png"),
+	"tow_rope": preload("res://art/heavy_ink/tow_rope.png"),
 	"horse_0": preload("res://art/heavy_ink/horse_0.png"),
 	"horse_1": preload("res://art/heavy_ink/horse_1.png"),
 	"horse_2": preload("res://art/heavy_ink/horse_2.png"),
@@ -46,18 +50,13 @@ const SPRITES := {
 	"tree": preload("res://art/heavy_ink/tree.png"),
 	"rock_split": preload("res://art/heavy_ink/rock_split.png"),
 	"rock_slab": preload("res://art/heavy_ink/rock_slab.png"),
-	"dirt": preload("res://art/heavy_ink/dirt.png"),
-	"grass": preload("res://art/heavy_ink/grass.png"),
-	"trail": preload("res://art/heavy_ink/trail.png"),
 	"embers": preload("res://art/heavy_ink/embers.png"),
 	"campfire": preload("res://art/heavy_ink/campfire.png"),
-	"wheel": preload("res://art/heavy_ink/wheel.png"),
 	"ballista_1": preload("res://art/heavy_ink/ballista_1.png"),
 	"ballista_2": preload("res://art/heavy_ink/ballista_2.png"),
 	"ballista_3": preload("res://art/heavy_ink/ballista_3.png"),
 }
 const HEAL_ICON := preload("res://art/heavy_ink/heal.svg")
-const HUD := Color(0.071, 0.107, 0.13, 0.88)
 const INK := Color("#101923")
 const PAPER := Color("#ece0c1")
 const MUTED := Color("#abb5bc")
@@ -68,7 +67,11 @@ const RED := Color("#f18878")
 var journey := Journey.new()
 var night := Night.new(journey)
 var active: Night.Hero
-var night_shade: ImageTexture
+var atmosphere := BoardArt.new(Night.SIZE, Night.FIRE, Night.LIGHT_RADIUS)
+var compact_frame := make_compact_frame()
+var frame_edge := make_frame_style(false, Color.WHITE)
+var compact_edge := make_frame_style(false, Color.WHITE, true)
+var frame_panel := make_frame_style(true, Color.WHITE)
 var day := Day.NIGHT
 var travel_elapsed := 0.0
 var stash_page := 0
@@ -128,7 +131,7 @@ func _ready() -> void:
 			frames.append(load(path) as Texture2D if ResourceLoader.exists(path) else null)
 		animation_frames[key] = frames
 	add_child(audio)
-	night_shade = BoardArt.new().make_night_shade(Night.SIZE, Night.FIRE, CELL, Night.LIGHT_RADIUS)
+	add_child(atmosphere)
 	make_button("Wall", "Wall  [2]", Vector2(932, ACTION_Y), 151, choose_build.bind("Wall"))
 	make_button("Ballista", "Ballista  [3]", Vector2(1094, ACTION_Y), 155, choose_build.bind("Ballista"))
 	make_button("advance", "End Turn", Vector2(935, 646), 328, advance)
@@ -146,6 +149,7 @@ func _ready() -> void:
 		var slider := HSlider.new()
 		slider.position = Vector2(935, 142 + i * 65)
 		slider.size.x = 328
+		slider.modulate = Color("#dab384")
 		slider.max_value = 100
 		slider.step = 1
 		slider.value_changed.connect(change_volume.bind(key))
@@ -174,6 +178,8 @@ func _ready() -> void:
 		make_button("equip%d" % i, "Equip", Vector2(695, 258 + 49 * i), 80, equip_visible.bind(i))
 		make_button("sell%d" % i, "Sell", Vector2(784, 258 + 49 * i), 102, sell_visible.bind(i))
 	make_button("dusk_equipment", "Manage Equipment", Vector2(935, 590), 328, toggle_dusk_equipment)
+	buttons.dusk_equipment.add_theme_font_override("font", TITLE_FONT)
+	buttons.dusk_equipment.add_theme_font_size_override("font_size", 19)
 	make_button("stash_prev", "Previous", Vector2(451, 611), 100, page_stash.bind(-1))
 	make_button("stash_next", "Next", Vector2(786, 611), 100, page_stash.bind(1))
 	for i in SHOP.size():
@@ -189,21 +195,34 @@ func make_button(key: String, label: String, position_at: Vector2, width: int, a
 	button.text = label
 	button.position = position_at
 	button.size = Vector2(width, 44)
-	button.add_theme_font_size_override("font_size", 17)
+	button.add_theme_font_override("font", UI_FONT)
+	button.add_theme_font_size_override("font_size", 18)
+	button.add_theme_color_override("font_color", PAPER)
+	button.add_theme_color_override("font_hover_color", GOLD)
+	button.add_theme_color_override("font_pressed_color", GOLD)
 	button.focus_mode = Control.FOCUS_NONE
-	for state in ["normal", "hover", "pressed", "disabled"]:
-		var style := StyleBoxFlat.new()
-		style.bg_color = Color("#28242a") if state == "normal" else Color("#3d3030")
-		style.border_color = Color("#8b684a") if state == "normal" else GOLD
-		if state == "disabled":
-			style.bg_color = Color("#211e21")
-			style.border_color = Color("#4e4140")
-		style.set_border_width_all(1)
-		style.border_width_bottom = 3
-		button.add_theme_stylebox_override(state, style)
+	var states := {"normal": Color.WHITE, "hover": Color(1.35, 1.19, 1.03),
+		"pressed": Color("#c99568"), "disabled": Color("#867c75")}
+	for state: String in states:
+		button.add_theme_stylebox_override(state, make_frame_style(true, states[state], true))
 	button.pressed.connect(action)
 	add_child(button)
 	buttons[key] = button
+
+func make_compact_frame() -> ImageTexture:
+	var image := FRAME_TEXTURE.get_image()
+	image.resize(192, 360, Image.INTERPOLATE_LANCZOS)
+	return ImageTexture.create_from_image(image)
+
+func make_frame_style(fill: bool, tint: Color, compact := false) -> StyleBoxTexture:
+	var style := StyleBoxTexture.new()
+	style.texture = compact_frame if compact else FRAME_TEXTURE
+	style.draw_center = fill
+	style.modulate_color = tint
+	for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+		style.set_texture_margin(side, 6.0 if compact else 11.0)
+		style.set_content_margin(side, 2.0)
+	return style
 
 func toggle_menu() -> void:
 	set_menu(Menu.MAIN if menu == Menu.CLOSED else Menu.CLOSED)
@@ -279,6 +298,9 @@ func pending_upgrades() -> Array[String]:
 
 func refresh() -> void:
 	audio.set_night(day == Day.NIGHT)
+	var on_road := day == Day.ROAD or (day == Day.DUSK and not dusk_equipment)
+	atmosphere.show_mist(day == Day.NIGHT or on_road, on_road, night.fire_hp > 0)
+	buttons.advance.add_theme_font_override("font", TITLE_FONT if day == Day.DUSK else UI_FONT)
 	if active.hp <= 0 and day == Day.NIGHT and night.phase == Night.Phase.PLAYER:
 		for hero: Night.Hero in night.heroes:
 			if hero.hp > 0:
@@ -904,7 +926,10 @@ func tile_rect(tile: Vector2i) -> Rect2:
 	return Rect2(BOARD + Vector2(tile) * CELL, Vector2.ONE * CELL)
 
 func label_at(at: Vector2, value: String, size: int, color: Color = PAPER) -> void:
-	draw_string(ThemeDB.fallback_font, at, value, HORIZONTAL_ALIGNMENT_LEFT, -1, size, color)
+	draw_string(UI_FONT, at, value, HORIZONTAL_ALIGNMENT_LEFT, -1, size, color)
+
+func title_at(at: Vector2, value: String, size: int, color: Color = GOLD) -> void:
+	draw_string(TITLE_FONT, at, value, HORIZONTAL_ALIGNMENT_LEFT, -1, size, color)
 
 func _draw() -> void:
 	draw_rect(Rect2(0, 0, 1280, 720), Color("#0e1720") if day == Day.NIGHT else Color("#302b24"))
@@ -916,7 +941,7 @@ func _draw() -> void:
 		draw_effects()
 		draw_set_transform(Vector2.ZERO)
 		draw_top_bar()
-		draw_rect(Rect2(0, 686, 908, 34), HUD)
+		frame_panel.draw(get_canvas_item(), Rect2(4, 686, 904, 34))
 		draw_hover_tip()
 		draw_sidebar()
 		if night.is_structure(inspected_defense) and menu == Menu.CLOSED:
@@ -928,7 +953,7 @@ func draw_top_bar() -> void:
 	draw_rect(Rect2(0, 0, 1280, 43), Color("#19171c"))
 	draw_line(Vector2(0, 42), Vector2(1280, 42), Color("#75533c"), 2)
 	draw_hud_frame(Rect2(12, 5, 292, 32), Color("#2e2425"))
-	label_at(Vector2(23, 27), Journey.CAMPS[journey.site].to_upper(), 18, GOLD)
+	title_at(Vector2(25, 27), Journey.CAMPS[journey.site], 20)
 	var labels := ["NIGHT %d" % (journey.site + 1), "WAVE %d/%d" % [night.wave, night.spawns.size()],
 		"TURN %02d" % night.turn, "FIRE %d/%d" % [night.fire_hp, Night.MAX_FIRE_HP], "SUPPLIES %d" % night.supplies]
 	for i in labels.size():
@@ -954,12 +979,12 @@ func draw_hover_tip() -> void:
 	elif not valid:
 		reason = "Sight blocked"
 	var status := "%d tiles • %s" % [gap, reason]
-	label_at(Vector2(473, 27), "%s   %d HP   •   %s" % [stats[0], enemy.hp, status], 14, TEAL if valid else RED)
+	draw_hud_frame(Rect2(12, 647, 380, 34), Color("#201b1c"))
+	label_at(Vector2(24, 669), "%s   %d HP   •   %s" % [stats[0], enemy.hp, status], 16, TEAL if valid else RED)
 
 func draw_defense_popup() -> void:
 	var origin := defense_popup_position()
-	draw_rect(Rect2(origin, Vector2(328, 116)), Color("#1c292d"))
-	draw_rect(Rect2(origin, Vector2(328, 116)), GOLD, false, 1)
+	frame_panel.draw(get_canvas_item(), Rect2(origin, Vector2(328, 116)))
 	var piece: Dictionary = night.defenses[inspected_defense]
 	label_at(origin + Vector2(12, 23), "%s  •  Rank %d  •  %d/%d HP" % [
 		piece.kind, piece.level, piece.hp, night.structure_max_hp(piece)], 16, GOLD)
@@ -967,18 +992,17 @@ func draw_defense_popup() -> void:
 	label_at(origin + Vector2(12, 48), detail, 14, MUTED)
 
 func draw_game_menu() -> void:
-	draw_rect(Rect2(918, 44, 352, 648), Color(0.067, 0.11, 0.14, 0.94))
-	draw_rect(Rect2(918, 44, 352, 648), Color("#5a615e"), false, 1)
+	frame_panel.draw(get_canvas_item(), Rect2(918, 44, 352, 648))
 	match menu:
 		Menu.MAIN:
-			label_at(Vector2(935, 83), "GAME MENU", 21, GOLD)
+			title_at(Vector2(935, 83), "Game Menu", 24)
 		Menu.SETTINGS:
-			label_at(Vector2(935, 83), "AUDIO SETTINGS", 21, GOLD)
+			title_at(Vector2(935, 83), "Audio Settings", 24)
 			label_at(Vector2(935, 129), "Master volume   %d%%" % roundi(audio.master * 100.0), 17)
 			label_at(Vector2(935, 194), "Sound effects   %d%%" % roundi(audio.sfx * 100.0), 17)
 			label_at(Vector2(935, 259), "Night ambience   %d%%" % roundi(audio.ambience_level * 100.0), 17)
 		Menu.RESTART:
-			label_at(Vector2(935, 83), "RESTART JOURNEY?", 21, GOLD)
+			title_at(Vector2(935, 83), "Restart Journey?", 24)
 			label_at(Vector2(935, 125), "Current journey progress will be lost.", 16, MUTED)
 
 func draw_cliff(tile: Vector2i) -> void:
@@ -1029,12 +1053,6 @@ func draw_board() -> void:
 	var board_rect := Rect2(BOARD, Vector2(Night.SIZE) * CELL)
 	draw_rect(board_rect.grow(3), Color("#5d5141"), false, 2)
 	draw_texture_rect(TERRAIN[journey.site], board_rect, false)
-	for y in range(0, Night.SIZE.y, 3):
-		for x in range(0, Night.SIZE.x, 3):
-			var extent := Vector2(mini(3, Night.SIZE.x - x), mini(3, Night.SIZE.y - y)) * CELL
-			var ground: String = "trail" if y == 6 else ("dirt" if (x + y) % 2 == 0 else "grass")
-			draw_texture_rect(SPRITES[ground], Rect2(Vector2(x, y) * CELL, extent), false, Color(1, 1, 1, 0.20))
-	draw_sprite("wheel", center(Night.FIRE) + Vector2(-42, -29), 24.0)
 	for tile: Vector2i in night.cliffs:
 		draw_cliff(tile)
 	for tile: Vector2i in night.rocks:
@@ -1046,10 +1064,7 @@ func draw_board() -> void:
 		draw_texture_rect(rock, rect, false)
 	for tile: Vector2i in night.trees:
 		draw_sprite("tree", center(tile), 60.0)
-	if night.fire_hp > 0:
-		draw_texture_rect(night_shade, board_rect, false)
-	else:
-		draw_rect(board_rect, Color(0.025, 0.044, 0.08, 0.76))
+	draw_texture_rect(atmosphere.get_texture(), board_rect, false)
 	var inspected_range := 0
 	if night.is_structure(inspected_defense):
 		var piece: Dictionary = night.defenses[inspected_defense]
@@ -1275,15 +1290,12 @@ func weapon_range(hero: Night.Hero) -> String:
 	var maximum := night.attack_range(hero)
 	return str(maximum) if minimum == maximum else "%d–%d" % [minimum, maximum]
 
-func draw_hud_frame(rect: Rect2, fill: Color, border := Color("#8a7257")) -> void:
+func draw_hud_frame(rect: Rect2, fill: Color, accent := Color.TRANSPARENT) -> void:
 	draw_rect(rect, fill)
-	draw_rect(rect, border.darkened(0.35), false, 1.0)
-	for x in [rect.position.x, rect.end.x]:
-		for y in [rect.position.y, rect.end.y]:
-			var corner := Vector2(x, y)
-			var inside := (rect.get_center() - corner).sign()
-			draw_line(corner, corner + Vector2(8 * inside.x, 0), border, 2)
-			draw_line(corner, corner + Vector2(0, 8 * inside.y), border, 2)
+	var style := compact_edge if rect.size.y <= 60.0 else frame_edge
+	style.draw(get_canvas_item(), rect)
+	if accent.a > 0.0:
+		draw_rect(Rect2(rect.position + Vector2(7, 10), Vector2(2, rect.size.y - 20)), accent)
 
 func health_color(ratio: float) -> Color:
 	if ratio <= 0.0:
@@ -1298,23 +1310,24 @@ func draw_counter(at: Vector2, value: int, color: Color, caption: String) -> voi
 	draw_circle(at, 10, color.darkened(0.66), true, -1, true)
 	draw_arc(at, 10, 0, TAU, 20, color, 1.4, true)
 	var digits := str(value)
-	var width := ThemeDB.fallback_font.get_string_size(digits, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+	var width := UI_FONT.get_string_size(digits, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
 	label_at(at + Vector2(-width * 0.5, 5), digits, 14)
-	label_at(at + Vector2(15, 5), caption, 13, color)
+	label_at(at + Vector2(15, 5), caption, 14, color)
 
 func draw_party() -> void:
-	var panel_height := 587 if day == Day.NIGHT else 446
-	draw_texture_rect(PARTY_PANEL, Rect2(913, 45, 355, panel_height), false)
-	label_at(Vector2(931, 67), "PARTY", 15, GOLD)
+	var panel_height := 594 if day == Day.NIGHT else 446
+	frame_panel.draw(get_canvas_item(), Rect2(913, 45, 355, panel_height))
+	title_at(Vector2(932, 68), "Party", 19)
 	for i in night.heroes.size():
 		var hero := night.heroes[i]
 		var row := Rect2(929, 74 + i * 65, 323, 60)
-		draw_hud_frame(row, Color("#263d3b") if active == hero else Color("#222d36"), TEAL if active == hero else Color("#8a7257"))
+		draw_hud_frame(row, Color("#263632") if active == hero else Color("#25292d"),
+			TEAL if active == hero else Color.TRANSPARENT)
 		draw_sprite(hero.title.to_lower(), row.position + Vector2(30, 30), 48.0)
 		var hp := night.max_health(hero) if day != Day.NIGHT else hero.hp
 		var hp_ratio := float(hp) / night.max_health(hero)
-		label_at(row.position + Vector2(64, 22), "%d  %s   Lv. %d" % [i + 1, hero.title, hero.character.level], 17)
-		label_at(row.position + Vector2(233, 22), "%d/%d HP" % [hp, night.max_health(hero)], 14, PAPER)
+		label_at(row.position + Vector2(64, 22), "%d  %s   Lv. %d" % [i + 1, hero.title, hero.character.level], 18)
+		label_at(row.position + Vector2(233, 22), "%d/%d HP" % [hp, night.max_health(hero)], 15, PAPER)
 		draw_rect(Rect2(row.position + Vector2(64, 30), Vector2(249, 4)), Color("#100e12"))
 		draw_rect(Rect2(row.position + Vector2(64, 30), Vector2(249 * hp_ratio, 4)), health_color(hp_ratio))
 		var move := hero.movement if day == Day.NIGHT else night.movement_limit(hero)
@@ -1329,10 +1342,10 @@ func draw_party() -> void:
 
 func draw_loadout() -> void:
 	var character := active.character
-	draw_hud_frame(Rect2(918, 276, 345, 83), PARTY_SECTION)
-	label_at(Vector2(931, 296), active.title.to_upper(), 15, GOLD)
+	draw_hud_frame(Rect2(929, 276, 323, 83), PARTY_SECTION)
+	title_at(Vector2(941, 298), active.title, 18)
 	label_at(Vector2(1100, 296), "XP %d / %d" % [character.xp, character.xp_goal()], 15, TEAL)
-	label_at(Vector2(931, 320), "%d damage   •   Range %s" % [night.attack_damage(active), weapon_range(active)], 16)
+	label_at(Vector2(941, 321), "%d damage   •   Range %s" % [night.attack_damage(active), weapon_range(active)], 17)
 	var detail := "Overwatch   •   1 AP and 1 shot"
 	if active == night.priest:
 		detail = "Heal +%d HP   •   Revive 1 AP" % night.heal_power()
@@ -1341,14 +1354,14 @@ func draw_loadout() -> void:
 			character.armor_guard(), 1 + character.rank_of("guard")]
 	if active != night.knight and character.armor_guard() > 0:
 		detail += "   •   Armor −%d" % character.armor_guard()
-	label_at(Vector2(931, 343), detail, 14, MUTED)
-	draw_hud_frame(Rect2(918, 365, 345, 112), PARTY_SECTION)
-	label_at(Vector2(931, 384), "EQUIPMENT", 15, GOLD)
-	var y := 389
+	label_at(Vector2(941, 344), detail, 16, MUTED)
+	draw_hud_frame(Rect2(929, 365, 323, 112), PARTY_SECTION)
+	title_at(Vector2(941, 385), "Equipment", 18)
+	var y := 390
 	var hovered_id := ""
 	for slot: String in character.equipment:
 		var id: String = character.equipment[slot]
-		var rect := Rect2(930, y, 321, 25)
+		var rect := Rect2(938, y, 305, 23)
 		draw_item_row(rect, id, slot.capitalize() + "  /  ")
 		if rect.has_point(get_local_mouse_position()):
 			hovered_id = id
@@ -1365,22 +1378,22 @@ func draw_sidebar() -> void:
 	draw_party()
 	if not pending_upgrades().is_empty():
 		draw_hud_frame(Rect2(922, 284, 338, 250), Color("#201a23"))
-		label_at(Vector2(938, 307), "LEVEL UP   /   %s" % active.title.to_upper(), 19, GOLD)
+		title_at(Vector2(938, 307), "Level Up   /   %s" % active.title, 21)
 		label_at(Vector2(938, 328), "Choose one upgrade", 15, MUTED)
 	else:
 		draw_loadout()
-		draw_hud_frame(Rect2(918, 483, 345, 144), PARTY_SECTION)
-		label_at(Vector2(931, 503), "ACTIONS", 15, GOLD)
+		draw_hud_frame(Rect2(929, 483, 323, 144), PARTY_SECTION)
+		title_at(Vector2(941, 503), "Actions", 18)
 		match night.phase:
 			Night.Phase.VICTORY:
 				label_at(Vector2(931, 546), "Dawn breaks.", 21, GOLD)
 			Night.Phase.DEFEAT:
 				label_at(Vector2(931, 546), "The darkness wins.", 21, RED)
 			Night.Phase.BUILD:
-				label_at(Vector2(931, 520), "Build in firelight or inspect a defense.", 14, MUTED)
+				label_at(Vector2(941, 520), "Build in firelight or inspect a defense.", 16, MUTED)
 			_:
-				label_at(Vector2(931, 520), "Attacks %d/%d   •   Hover a foe for intent" % [
-					active.attacks, night.attack_limit(active)], 14, MUTED)
+				label_at(Vector2(941, 520), "Attacks %d/%d   •   Hover a foe for intent" % [
+					active.attacks, night.attack_limit(active)], 16, MUTED)
 	label_at(Vector2(20, 708), night.message, 17, PAPER)
 
 func draw_item_row(rect: Rect2, id: String, prefix := "", stats := false) -> void:
@@ -1396,14 +1409,14 @@ func draw_item_row(rect: Rect2, id: String, prefix := "", stats := false) -> voi
 	var text_x := 33 if not stats else 42
 	var text_width := rect.size.x - text_x - 6.0
 	var name_text: String = prefix + item.name
-	var font := ThemeDB.fallback_font
-	var name_width := font.get_string_size(name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x
-	var name_size := mini(15, floori(15 * text_width / name_width))
+	var font := UI_FONT
+	var name_width := font.get_string_size(name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+	var name_size := mini(16, floori(16 * text_width / name_width))
 	label_at(rect.position + Vector2(text_x, 18), name_text, name_size, Journey.RARITY_COLORS[item.rarity])
 	if stats:
 		var detail := Journey.item_stats(id)
-		var detail_width := font.get_string_size(detail, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-		var detail_size := mini(13, floori(13 * text_width / detail_width))
+		var detail_width := font.get_string_size(detail, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+		var detail_size := mini(14, floori(14 * text_width / detail_width))
 		label_at(rect.position + Vector2(text_x, 35), detail, detail_size, MUTED)
 
 func draw_day() -> void:
@@ -1411,12 +1424,12 @@ func draw_day() -> void:
 		draw_road()
 		return
 	var titles := ["", "DAWN  /  BREAK CAMP", "DAY  /  ROADSIDE TRADER", "DUSK  /  MAKE CAMP", "DAY  /  JOURNEY COMPLETE"]
-	label_at(Vector2(20, 27), titles[day], 16, GOLD)
-	label_at(Vector2(920, 27), "DAYLIGHT  /  SAFE TO EQUIP", 16, GOLD)
-	draw_hud_frame(Rect2(20, 48, 883, 615), HUD)
+	title_at(Vector2(20, 28), titles[day], 18)
+	title_at(Vector2(919, 27), "Daylight  /  Safe to Equip", 16)
+	frame_panel.draw(get_canvas_item(), Rect2(20, 48, 883, 615))
 	if day == Day.MERCHANT:
-		draw_texture_rect_region(SPRITES.merchant, Rect2(26, 54, 871, 160), Rect2(0, 25, 960, 176))
-		label_at(Vector2(35, 242), "MERCHANT WARES", 19, GOLD)
+		draw_texture_rect_region(SPRITES.merchant, Rect2(32, 60, 859, 154), Rect2(0, 25, 960, 176))
+		title_at(Vector2(35, 242), "Merchant Wares", 21)
 		for i in SHOP.size():
 			var id: String = SHOP[i]
 			var y := 258 + i * 49
@@ -1425,11 +1438,11 @@ func draw_day() -> void:
 			else:
 				draw_item_row(Rect2(34, y, 281, 44), "", "Sold  /  ")
 	else:
-		label_at(Vector2(35, 90), "THE CARAVAN", 25, GOLD)
+		title_at(Vector2(35, 90), "The Caravan", 27)
 		label_at(Vector2(35, 125), "Pine Hollow   →   Roadside trader   →   Stoneford", 17)
 		if day == Day.DAWN:
 			label_at(Vector2(35, 154), "Salvaged %d items and 4 gold." % dawn_loot.size(), 16, MUTED)
-	label_at(Vector2(451, 242), "CARAVAN STASH", 19, GOLD)
+	title_at(Vector2(451, 242), "Caravan Stash", 21)
 	label_at(Vector2(804, 242), "%d GOLD" % journey.gold, 16, GOLD)
 	var first := stash_page * STASH_PAGE_SIZE
 	for i in mini(STASH_PAGE_SIZE, journey.inventory.size() - first):
@@ -1446,37 +1459,41 @@ func draw_road() -> void:
 	var progress := clampf(travel_elapsed / TRAVEL_DURATION, 0.0, 1.0)
 	var time := travel_elapsed
 	draw_texture_rect(SPRITES.road, Rect2(-progress * 100, 0, 1380, 720), false)
-	var sun := Vector2(890 - progress * 75, lerpf(110, 310, progress))
-	draw_circle(sun, 41, Color(1, 0.55, 0.24, 0.16), true, -1, true)
-	draw_circle(sun, 30, Color("#f5a567"), true, -1, true)
 	draw_rect(Rect2(0, 0, 1280, 720), Color(0.13, 0.08, 0.21, 0.48 * progress))
-	var wagon := Vector2(439 + progress * 116, 514)
+	draw_texture_rect(atmosphere.get_texture(), Rect2(Vector2.ZERO, VIEW), false)
+	var bounce := sin(time * 10.0) * sin(progress * PI) * 1.7
+	var wagon := Vector2(439 + progress * 116, 514 + bounce)
 	draw_sprite("wagon", wagon, 345.0)
-	draw_wheel(wagon + Vector2(-93, 83), time, 28.0)
-	draw_wheel(wagon + Vector2(18, 83), time, 28.0)
+	var roll := progress * 216.0 / 28.0
+	draw_wheel(wagon + Vector2(-93, 83 - bounce * 0.65), roll)
+	draw_wheel(wagon + Vector2(18, 83 - bounce * 0.65), roll)
 	var gait := [0, 1, 2, 1]
 	var step: int = gait[int(time * 8.0) % gait.size()] if day == Day.ROAD else 0
-	var horse := wagon + Vector2(248, 41)
+	var horse := wagon + Vector2(248, 41 - bounce)
 	draw_sprite("horse_%d" % step, horse, 202.0)
 	var hitch := wagon + Vector2(157, 55)
 	var harness := horse + Vector2(-22, 1)
-	draw_line(hitch, harness, Color("#241719"), 6.0, true)
-	draw_line(hitch, harness, Color("#ae8455"), 2.0, true)
-	draw_hud_frame(Rect2(22, 23, 415, 67), Color("#231d24"))
-	label_at(Vector2(38, 49), "THE ROAD TO STONEFORD", 21, GOLD)
-	label_at(Vector2(38, 73), "The sun is setting" if day == Day.ROAD else "Arrived at dusk", 16)
-	draw_rect(Rect2(24, 674, 416, 8), Color("#211a22"))
-	draw_rect(Rect2(24, 674, 416 * progress, 8), GOLD)
-	label_at(Vector2(24, 709), day_message, 17)
+	draw_set_transform((hitch + harness) * 0.5, hitch.angle_to_point(harness))
+	var rope_length := hitch.distance_to(harness) + 4.0
+	draw_texture_rect(SPRITES.tow_rope, Rect2(-rope_length * 0.5, -5.0, rope_length, 10.0), false)
+	draw_set_transform(Vector2.ZERO)
+	frame_panel.draw(get_canvas_item(), Rect2(22, 23, 370, 126))
+	title_at(Vector2(45, 52), "The Road to", 20)
+	title_at(Vector2(43, 96), "Stoneford", 43, PAPER)
+	draw_line(Vector2(45, 107), Vector2(361, 107), Color("#8e6340"), 1)
+	label_at(Vector2(45, 132), "The sun is setting" if day == Day.ROAD else "Arrived at dusk", 18, MUTED)
+	frame_panel.draw(get_canvas_item(), Rect2(22, 650, 500, 59))
+	draw_rect(Rect2(40, 665, 464, 6), Color("#362a25"))
+	draw_rect(Rect2(40, 665, 464 * progress, 6), GOLD)
+	label_at(Vector2(40, 693), day_message, 17)
+	if day == Day.DUSK and menu == Menu.CLOSED:
+		frame_panel.draw(get_canvas_item(), Rect2(919, 550, 360, 151))
+		title_at(Vector2(938, 578), "Make Camp", 20)
 
-func draw_wheel(at: Vector2, time: float, radius: float) -> void:
-	draw_circle(at, radius, Color("#211719"), true, -1, true)
-	draw_circle(at, radius - 5, Color("#614132"), true, -1, true)
-	for i in 8:
-		var edge := Vector2.from_angle(i * TAU / 8.0 + time * 4.2) * (radius - 4)
-		draw_line(at, at + edge, Color("#c18a57"), 2.5, true)
-	draw_arc(at, radius - 1, 0, TAU, 32, Color("#84614a"), 2, true)
-	draw_circle(at, 5, Color("#302229"), true, -1, true)
+func draw_wheel(at: Vector2, angle: float) -> void:
+	draw_set_transform(at, angle)
+	draw_texture_rect(SPRITES.wagon_wheel, Rect2(-28, -28, 56, 56), false)
+	draw_set_transform(Vector2.ZERO)
 
 func bless(tile: Vector2i) -> void:
 	blessing_tile = tile
