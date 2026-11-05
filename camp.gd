@@ -1362,9 +1362,10 @@ func draw_loadout() -> void:
 		label_at(Vector2(931, 434), "Heal +%d HP   •   Revive 1 AP" % night.heal_power(), 14, MUTED)
 	if character.shield_guard() > 0 or character.armor_guard() > 0:
 		var protection := "Armor −%d" % character.armor_guard()
+		if character.equipment.has("shield"):
+			protection = "Shield −%d   %s" % [character.shield_guard(), protection]
 		if active == night.knight:
-			protection = "Shield −%d   %s   Defend −%d extra" % [
-				character.shield_guard(), protection, 1 + character.rank_of("guard")]
+			protection += "   Defend −%d extra" % (1 + character.rank_of("guard"))
 		label_at(Vector2(931, 447), protection, 14, MUTED)
 
 func draw_sidebar() -> void:

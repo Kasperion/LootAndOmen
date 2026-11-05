@@ -107,7 +107,7 @@ var ranger := Character.new("Ranger", 12, {"bow": "hunting_bow", "armor": "trave
 	["range", "move", "pin", "damage", "health"])
 var knight := Character.new("Knight", 18, {"sword": "short_sword", "shield": "militia_shield", "armor": "ringmail"},
 	["damage", "guard", "health", "move"])
-var priest := Character.new("Priest", 14, {"mace": "pilgrim_mace", "armor": "travel_coat"},
+var priest := Character.new("Priest", 14, {"mace": "pilgrim_mace", "armor": "travel_coat", "shield": ""},
 	["heal", "health", "move", "damage"])
 var site := 0
 var gold := 4
