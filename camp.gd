@@ -5,6 +5,21 @@ const Journey := preload("res://journey.gd")
 const CampAudio := preload("res://camp_audio.gd")
 const BoardArt := preload("res://board_art.gd")
 const TERRAIN := [preload("res://art/heavy_ink/pine_ground.webp"), preload("res://art/heavy_ink/stoneford_ground.webp")]
+const CAMP_FEATURES := [
+	preload("res://art/heavy_ink/camp_church.webp"), preload("res://art/heavy_ink/camp_home.webp"),
+	preload("res://art/heavy_ink/camp_cliff.webp"), preload("res://art/heavy_ink/camp_ravine.webp"),
+	preload("res://art/heavy_ink/camp_river.webp"),
+]
+const CAMP_TREES := [
+	preload("res://art/heavy_ink/tree_pine.webp"), preload("res://art/heavy_ink/tree_bare.webp"),
+	preload("res://art/heavy_ink/tree_autumn.webp"), preload("res://art/heavy_ink/tree_scrub.webp"),
+	preload("res://art/heavy_ink/tree_dead.webp"),
+]
+const CAMP_ROCKS := [
+	preload("res://art/heavy_ink/stone_slate.webp"), preload("res://art/heavy_ink/stone_moss.webp"),
+	preload("res://art/heavy_ink/stone_cluster.webp"),
+]
+const CAMP_WAGON := preload("res://art/heavy_ink/wagon_parked.webp")
 enum Day { NIGHT, DAWN, MERCHANT, DUSK, COMPLETE, ROAD }
 const TRAVEL_DURATION := 7.0
 const STASH_PAGE_SIZE := 7
@@ -21,6 +36,7 @@ const PARTY_ROW_STEP := 62
 const CELL := 58
 const BOARD := Vector2.ZERO
 const VIEW := Vector2(1280, 720)
+const BATTLEFIELD := Rect2(0, 43, 908, 643)
 const SPRITES := {
 	"merchant": preload("res://art/heavy_ink/merchant.webp"),
 	"road": preload("res://art/heavy_ink/road.webp"),
@@ -48,10 +64,6 @@ const SPRITES := {
 	"ranger": preload("res://art/heavy_ink/ranger.png"),
 	"knight": preload("res://art/heavy_ink/knight.png"),
 	"priest": preload("res://art/heavy_ink/priest.png"),
-	"rock_cluster": preload("res://art/heavy_ink/rock_cluster.png"),
-	"tree": preload("res://art/heavy_ink/tree.png"),
-	"rock_split": preload("res://art/heavy_ink/rock_split.png"),
-	"rock_slab": preload("res://art/heavy_ink/rock_slab.png"),
 	"embers": preload("res://art/heavy_ink/embers.png"),
 	"campfire": preload("res://art/heavy_ink/campfire.png"),
 	"ballista_1": preload("res://art/heavy_ink/ballista_1.png"),
@@ -283,8 +295,10 @@ func begin_night(supplies: int = 0) -> void:
 	firing_tile = Night.NO_TILE
 	damaged_tile = Night.NO_TILE
 	night.start_wave()
-	camera_zoom = 1.05
-	camera_offset = VIEW * 0.5 - center(Night.FIRE) * camera_zoom
+	var board_size := Vector2(Night.SIZE) * CELL
+	var fit := (BATTLEFIELD.size - Vector2(26, 20)) / board_size
+	camera_zoom = minf(fit.x, fit.y)
+	camera_offset = BATTLEFIELD.get_center() - center(Night.FIRE) * camera_zoom
 	pointer_button = 0
 	hit_actor = null
 	attack_actor = null
@@ -318,7 +332,7 @@ func refresh() -> void:
 	if leveling != null:
 		active = leveling
 	reach = night.reach_for(active)
-	update_intent(tile_at(screen_to_world(get_local_mouse_position())))
+	update_intent(battlefield_tile(get_local_mouse_position()))
 	for button: Button in buttons.values():
 		button.hide()
 	for slider: HSlider in sliders.values():
@@ -599,7 +613,7 @@ func _process(delta: float) -> void:
 			day = Day.DUSK
 			day_message = "The caravan reaches Stoneford as the light fades."
 			refresh()
-	var hovered := tile_at(screen_to_world(get_local_mouse_position()))
+	var hovered := battlefield_tile(get_local_mouse_position())
 	if hovered != intent_tile:
 		update_intent(hovered)
 	queue_redraw()
@@ -634,10 +648,15 @@ func world_to_screen(point: Vector2) -> Vector2:
 func screen_to_world(point: Vector2) -> Vector2:
 	return (point - camera_offset) / camera_zoom
 
+func battlefield_tile(point: Vector2) -> Vector2i:
+	return tile_at(screen_to_world(point)) if BATTLEFIELD.has_point(point) else Night.NO_TILE
+
 func limit_camera() -> void:
 	var field := Vector2(Night.SIZE) * CELL * camera_zoom
-	camera_offset.x = clampf(camera_offset.x, 180 - field.x, VIEW.x - 180)
-	camera_offset.y = clampf(camera_offset.y, 145 - field.y, VIEW.y - 145)
+	camera_offset.x = clampf(camera_offset.x, minf(0, BATTLEFIELD.end.x - field.x),
+		maxf(0, BATTLEFIELD.end.x - field.x))
+	camera_offset.y = clampf(camera_offset.y, minf(BATTLEFIELD.position.y, BATTLEFIELD.end.y - field.y),
+		maxf(BATTLEFIELD.position.y, BATTLEFIELD.end.y - field.y))
 	if night.is_structure(inspected_defense):
 		place_defense_popup()
 
@@ -661,7 +680,7 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		if click:
 			var point: Vector2 = get_global_transform_with_canvas().affine_inverse() * event.position
-			board_click(tile_at(screen_to_world(point)))
+			board_click(battlefield_tile(point))
 		return
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
@@ -693,16 +712,18 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not pointer_allowed() or not (event is InputEventMouseButton and event.pressed):
 		return
 	var point: Vector2 = get_global_transform_with_canvas().affine_inverse() * event.position
+	if not BATTLEFIELD.has_point(point):
+		return
 	if event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
 		var anchor := screen_to_world(point)
 		var factor := 1.12 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.12
-		camera_zoom = clampf(camera_zoom * factor, 0.60, 1.85)
+		camera_zoom = clampf(camera_zoom * factor, 0.48, 1.85)
 		camera_offset = point - anchor * camera_zoom
 		limit_camera()
 		get_viewport().set_input_as_handled()
 	elif event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_MIDDLE, MOUSE_BUTTON_RIGHT]:
-		if event.button_index == MOUSE_BUTTON_LEFT and (Rect2(918, 52, 345, 470).has_point(point)
-				or (night.is_structure(inspected_defense) and Rect2(defense_popup_position(), Vector2(328, 116)).has_point(point))):
+		if event.button_index == MOUSE_BUTTON_LEFT and night.is_structure(inspected_defense) \
+				and Rect2(defense_popup_position(), Vector2(328, 116)).has_point(point):
 			return
 		pointer_button = event.button_index
 		pointer_origin = point
@@ -953,6 +974,7 @@ func _draw() -> void:
 		draw_board()
 		draw_effects()
 		draw_set_transform(Vector2.ZERO)
+		draw_rect(Rect2(908, 43, 372, 677), Color("#151416"))
 		draw_top_bar()
 		frame_panel.draw(get_canvas_item(), Rect2(4, 686, 904, 34))
 		label_in(Rect2(20, 691, 870, 23), night.message, 17)
@@ -969,17 +991,19 @@ func draw_top_bar() -> void:
 	draw_line(Vector2(0, 42), Vector2(1280, 42), Color("#75533c"), 2)
 	draw_hud_frame(Rect2(12, 5, 292, 32), Color("#2e2425"))
 	label_in(Rect2(24, 9, 268, 24), Journey.CAMPS[journey.site], 20, GOLD, TITLE_FONT)
-	var labels := ["NIGHT %d" % (journey.site + 1), "WAVE %d/%d" % [night.wave, night.spawns.size()],
+	var labels := ["NIGHT %d" % (journey.site + 1), "WAVE %d/%d" % [night.wave, Night.WAVES.size()],
 		"TURN %02d" % night.turn, "FIRE %d/%d" % [night.fire_hp, Night.MAX_FIRE_HP], "SUPPLIES %d" % night.supplies]
 	for i in labels.size():
 		var x := 316 + i * 126 if i < 3 else 887 + (i - 3) * 126
 		draw_hud_frame(Rect2(x, 5, 118, 32), Color("#292328"))
 		label_in(Rect2(x + 9, 9, 100, 24), labels[i], 16, PAPER if i < 3 else GOLD)
+	draw_hud_frame(Rect2(694, 5, 185, 32), Color("#292328"))
+	label_in(Rect2(704, 9, 165, 24), night.layout.feature_label(), 16, PAPER)
 
 func draw_hover_tip() -> void:
 	if night.phase != Night.Phase.PLAYER or busy or menu != Menu.CLOSED:
 		return
-	var tile := tile_at(screen_to_world(get_local_mouse_position()))
+	var tile := battlefield_tile(get_local_mouse_position())
 	var enemy := night.enemy_at(tile)
 	if enemy == null:
 		return
@@ -1022,19 +1046,16 @@ func draw_game_menu() -> void:
 			label_at(Vector2(935, 125), "Current journey progress will be lost.", 16, MUTED)
 
 func draw_board() -> void:
-	var hovered := tile_at(screen_to_world(get_local_mouse_position()))
+	var hovered := battlefield_tile(get_local_mouse_position())
 	var board_rect := Rect2(BOARD, Vector2(Night.SIZE) * CELL)
 	draw_rect(board_rect.grow(3), Color("#5d5141"), false, 2)
 	draw_texture_rect(TERRAIN[journey.site], board_rect, false)
-	for tile: Vector2i in night.rocks:
-		var variant := posmod(tile.x * 7 + tile.y * 11 + journey.site, 3)
-		var rock_key: String = ["rock_cluster", "rock_split", "rock_slab"][variant]
-		var rock: Texture2D = SPRITES[rock_key]
-		var rect := sprite_rect(rock, center(tile), 47.0)
-		rect.position.y = center(tile).y + 15.0 - rect.size.y
-		draw_texture_rect(rock, rect, false)
-	for tile: Vector2i in night.trees:
-		draw_sprite("tree", center(tile), 60.0)
+	draw_camp_prop(CAMP_FEATURES[night.layout.feature], night.layout.barrier)
+	draw_camp_prop(CAMP_WAGON, night.layout.wagon, Vector2(0.95, 1.12))
+	for tile: Vector2i in night.layout.rocks:
+		draw_ground_prop(CAMP_ROCKS[night.layout.rocks[tile]], tile, 48.0, 13.0)
+	for tile: Vector2i in night.layout.trees:
+		draw_ground_prop(CAMP_TREES[night.layout.trees[tile]], tile, 79.0, 18.0)
 	draw_texture_rect(atmosphere.get_texture(), board_rect, false)
 	var inspected_range := 0
 	if night.is_structure(inspected_defense):
@@ -1076,6 +1097,27 @@ func draw_board() -> void:
 		if hero.prepared:
 			draw_circle(at + Vector2(15, -15), 4, GOLD)
 
+func draw_camp_prop(texture: Texture2D, area: Rect2i, art_scale := Vector2.ONE) -> void:
+	var at := BOARD + (Vector2(area.position) + Vector2(area.size) * 0.5) * CELL
+	var dimensions := Vector2(area.size)
+	if night.layout.blocked_side.x != 0:
+		dimensions = Vector2(dimensions.y, dimensions.x)
+	var art_size := dimensions * CELL * art_scale
+	draw_set_transform_matrix(board_transform() * Transform2D(night.layout.angle(), at))
+	draw_texture_rect(texture, Rect2(-art_size * 0.5, art_size), false)
+	draw_set_transform_matrix(board_transform())
+
+func draw_ground_prop(texture: Texture2D, tile: Vector2i, side: float, foot_offset: float) -> void:
+	var at := center(tile)
+	var variation := 0.92 + posmod(tile.x * 13 + tile.y * 23, 7) * 0.025
+	var rect := sprite_rect(texture, at, side * variation)
+	rect.position.y = at.y + foot_offset - rect.size.y
+	var foot := Vector2(at.x, rect.end.y - 2.0)
+	draw_set_transform_matrix(board_transform() * Transform2D(0.0, Vector2(1, 0.35), 0.0, foot))
+	draw_circle(Vector2.ZERO, minf(rect.size.x * 0.42, 20.0), Color(0.10, 0.07, 0.06, 0.35))
+	draw_set_transform_matrix(board_transform())
+	draw_texture_rect(texture, rect, false)
+
 func draw_tile_overlay(tile: Vector2i, hovered: Vector2i, inspected_range: int) -> void:
 	var rect := tile_rect(tile)
 	var grid_color := Color(0.92, 0.78, 0.55, 0.20) if night.is_lit(tile) else Color(0.66, 0.74, 0.80, 0.13)
@@ -1091,10 +1133,17 @@ func draw_tile_overlay(tile: Vector2i, hovered: Vector2i, inspected_range: int) 
 	if tile == intent_target:
 		draw_rect(rect.grow(-4), RED, false, 3)
 	if tile == hovered:
-		draw_rect(rect.grow(-2), PAPER, false, 2.0)
 		var text_color := GOLD if night.is_lit(tile) else MUTED
-		var light_status := "FIRELIGHT" if night.is_lit(tile) else "DARKNESS"
-		label_at(rect.position + Vector2(3, CELL - 5), light_status, 9, text_color)
+		var light_status := "LIT" if night.is_lit(tile) else "DARK"
+		if night.is_terrain_blocked(tile):
+			light_status = "BLOCKED"
+			text_color = RED
+		elif night.can_build_at(tile, selected_build):
+			light_status = "BUILD"
+			text_color = GOLD
+		draw_rect(rect.grow(-2), text_color, false, 2.0)
+		label_in(Rect2(rect.position + Vector2(3, CELL - 21), Vector2(CELL - 6, 19)),
+			light_status, clampi(roundi(11.0 / camera_zoom), 10, 18), text_color)
 
 func polygon(at: Vector2, points: Array, color: Color) -> void:
 	var vertices := PackedVector2Array()
@@ -1370,7 +1419,7 @@ func draw_sidebar() -> void:
 			Night.Phase.DEFEAT:
 				label_in(Rect2(940, 546, 302, 24), "The darkness wins.", 18, RED)
 			Night.Phase.BUILD:
-				label_in(Rect2(940, 544, 302, 20), "Build in firelight or inspect a defense.", 16, MUTED)
+				label_in(Rect2(940, 544, 302, 20), "Build on open ground or inspect a defense.", 16, MUTED)
 			Night.Phase.ENEMY:
 				label_in(Rect2(940, 544, 302, 20), "Enemy turn", 16, MUTED)
 			_:
@@ -1457,7 +1506,7 @@ func draw_road() -> void:
 	var harness := horse + Vector2(-22, 1)
 	draw_set_transform((hitch + harness) * 0.5, hitch.angle_to_point(harness))
 	var rope_length := hitch.distance_to(harness) + 4.0
-	draw_texture_rect(SPRITES.tow_rope, Rect2(-rope_length * 0.5, -5.0, rope_length, 10.0), false)
+	draw_texture_rect(SPRITES.tow_rope, Rect2(-rope_length * 0.5, -3.5, rope_length, 11.0), false)
 	draw_set_transform(Vector2.ZERO)
 	frame_panel.draw(get_canvas_item(), Rect2(22, 23, 370, 126))
 	title_at(Vector2(45, 52), "The Road to", 20)

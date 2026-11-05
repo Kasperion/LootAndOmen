@@ -1,11 +1,12 @@
 extends RefCounted
 
 const Journey := preload("res://journey.gd")
+const CampLayout := preload("res://camp_layout.gd")
 
 enum Phase { PLAYER, ENEMY, BUILD, VICTORY, DEFEAT }
 
-const SIZE := Vector2i(21, 15)
-const FIRE := Vector2i(10, 7)
+const SIZE := Vector2i(27, 21)
+const FIRE := Vector2i(13, 10)
 const LIGHT_RADIUS := 4
 const DARK_DAMAGE := 1
 const ENEMY_MOVE := 3
@@ -17,35 +18,17 @@ const CREATURES := {
 	"brute": ["Graveback", 6, 4, 2, 1],
 	"boss": ["The Hollow Maw", 15, 5, 2, 2],
 }
-const WAVE_CREATURES := [
-	["husk", "skitter", "husk", "husk"],
-	["brute", "husk", "skitter", "husk", "brute"],
-	["husk", "skitter", "brute", "brute", "skitter", "boss"],
+const WAVES := [
+	[["husk", "skitter", "husk", "husk"], ["husk", "husk", "skitter", "skitter"]],
+	[["brute", "husk", "skitter", "husk", "brute"], ["skitter", "brute", "husk", "brute", "skitter"]],
+	[["husk", "skitter", "brute", "brute", "skitter", "boss"],
+		["brute", "husk", "skitter", "brute", "husk", "boss"]],
 ]
 const MAX_AP := 3
 const MAX_FIRE_HP := 18
-const SPAWNS := [
-	[Vector2i(2, 4), Vector2i(18, 10), Vector2i(6, 12), Vector2i(14, 2)],
-	[Vector2i(2, 4), Vector2i(18, 10), Vector2i(6, 12), Vector2i(14, 2), Vector2i(17, 4)],
-	[Vector2i(2, 4), Vector2i(18, 10), Vector2i(6, 12), Vector2i(14, 2), Vector2i(17, 4), Vector2i(1, 7)],
-]
-const ROCKS := [Vector2i(5, 6), Vector2i(6, 6), Vector2i(6, 7), Vector2i(14, 7),
-	Vector2i(14, 8), Vector2i(15, 8), Vector2i(9, 3), Vector2i(11, 11), Vector2i(16, 12)]
-const STONEFORD_ROCKS := [Vector2i(6, 3), Vector2i(7, 3), Vector2i(7, 4),
-	Vector2i(12, 6), Vector2i(13, 6), Vector2i(13, 7), Vector2i(13, 8), Vector2i(14, 8),
-	Vector2i(6, 10), Vector2i(7, 10), Vector2i(17, 3)]
-const STONEFORD_SPAWNS := [
-	[Vector2i(2, 7), Vector2i(18, 5), Vector2i(16, 12), Vector2i(7, 1)],
-	[Vector2i(2, 7), Vector2i(18, 5), Vector2i(16, 12), Vector2i(7, 1), Vector2i(12, 13)],
-	[Vector2i(2, 7), Vector2i(18, 5), Vector2i(16, 12), Vector2i(7, 1), Vector2i(12, 13), Vector2i(17, 7)],
-]
-const PINE_TREES := [Vector2i(2, 1), Vector2i(3, 2), Vector2i(8, 2), Vector2i(11, 3),
-	Vector2i(16, 1), Vector2i(18, 3), Vector2i(3, 6), Vector2i(4, 11), Vector2i(8, 11),
-	Vector2i(13, 11), Vector2i(18, 13), Vector2i(5, 1), Vector2i(1, 12), Vector2i(19, 1)]
-const FORD_TREES := [Vector2i(2, 2), Vector2i(4, 4), Vector2i(8, 3), Vector2i(12, 4),
-	Vector2i(17, 1), Vector2i(17, 9), Vector2i(4, 10), Vector2i(8, 12), Vector2i(12, 11),
-	Vector2i(15, 10), Vector2i(19, 12), Vector2i(1, 3)]
-const DIRECTIONS := [Vector2i.RIGHT, Vector2i.DOWN, Vector2i.LEFT, Vector2i.UP]
+const CARDINALS := [Vector2i.RIGHT, Vector2i.DOWN, Vector2i.LEFT, Vector2i.UP]
+const STEPS := [Vector2i.RIGHT, Vector2i.DOWN, Vector2i.LEFT, Vector2i.UP,
+	Vector2i(1, 1), Vector2i(-1, 1), Vector2i(-1, -1), Vector2i(1, -1)]
 const BUILD_COST := {"Wall": 2, "Ballista": 3}
 const STRUCTURE_HP := {"Wall": 5, "Ballista": 4}
 const MAX_STRUCTURE_LEVEL := 3
@@ -98,37 +81,65 @@ var heroes: Array[Hero] = []
 var fire_hp := MAX_FIRE_HP
 var kills := 0
 var loot: Dictionary = {}
-var rocks: Array
-var trees: Array
-var spawns: Array
+var layout: CampLayout
 var supplies := 0
 var enemies: Array[Enemy] = []
 var defenses: Dictionary = {}
 var message := ""
 
-func _init(run: Journey = null) -> void:
+func _init(run: Journey = null, map_seed: int = -1) -> void:
 	journey = run if run != null else Journey.new()
-	ranger = Hero.new(journey.ranger, FIRE + Vector2i.DOWN)
-	knight = Hero.new(journey.knight, FIRE + Vector2i.UP)
-	priest = Hero.new(journey.priest, FIRE + Vector2i.LEFT)
+	layout = CampLayout.new(SIZE, FIRE, randi() if map_seed == -1 else map_seed)
+	ranger = Hero.new(journey.ranger, FIRE + layout.approaches[0])
+	knight = Hero.new(journey.knight, FIRE + layout.approaches[1])
+	priest = Hero.new(journey.priest, FIRE + layout.approaches[2])
 	heroes.assign([ranger, knight, priest])
-	rocks = ROCKS if journey.site == 0 else STONEFORD_ROCKS
-	trees = PINE_TREES if journey.site == 0 else FORD_TREES
-	spawns = SPAWNS if journey.site == 0 else STONEFORD_SPAWNS
 
 func start_wave() -> void:
-	if wave >= spawns.size() or (wave > 0 and phase != Phase.BUILD):
+	if wave >= WAVES.size() or (wave > 0 and phase != Phase.BUILD):
 		return
 	wave += 1
 	turn = 1
 	phase = Phase.PLAYER
 	reset_actions()
-	for i in spawns[wave - 1].size():
-		var kind: String = WAVE_CREATURES[wave - 1][i]
-		var stats: Array = CREATURES[kind]
-		var health: int = stats[1] + (journey.site * 3 if kind == "boss" else 0)
-		enemies.append(Enemy.new(spawns[wave - 1][i], health, stats[2], kind, stats[3], stats[4]))
-	message = "The Hollow Maw has arrived." if wave == spawns.size() else "Wave %d approaches. Keep the fire alive." % wave
+	var options: Array = WAVES[wave - 1]
+	var creatures: Array = options[layout.random.randi_range(0, options.size() - 1)]
+	var first_side := layout.random.randi_range(0, layout.approaches.size() - 1)
+	for i in creatures.size():
+		spawn_enemy(creatures[i], first_side + i)
+	message = "The Hollow Maw has arrived." if wave == WAVES.size() else "Wave %d approaches. Keep the fire alive." % wave
+
+func spawn_enemy(kind: String, side_index: int) -> void:
+	var stats: Array = CREATURES[kind]
+	var health: int = stats[1] + (journey.site * 3 if kind == "boss" else 0)
+	var enemy := Enemy.new(NO_TILE, health, stats[2], kind, stats[3], stats[4])
+	var fallback := NO_TILE
+	for offset in layout.approaches.size():
+		var side := layout.approaches[(side_index + offset) % layout.approaches.size()]
+		var cells := layout.entry_cells(side, enemy.size)
+		while not cells.is_empty():
+			var tile: Vector2i = cells.pop_at(layout.random.randi_range(0, cells.size() - 1))
+			if not can_enemy_enter(enemy, tile, false):
+				continue
+			if fallback == NO_TILE:
+				fallback = tile
+			if not entry_has_room(tile, enemy.size):
+				continue
+			enemy.tile = tile
+			if search_path(enemy, FIRE, false).is_empty() and search_path(enemy, FIRE, true).is_empty():
+				continue
+			enemies.append(enemy)
+			return
+	if fallback != NO_TILE:
+		enemy.tile = fallback
+		enemies.append(enemy)
+
+func entry_has_room(tile: Vector2i, size: int) -> bool:
+	var area := Rect2i(tile, Vector2i.ONE * size).grow(1)
+	for enemy: Enemy in enemies:
+		if area.intersects(Rect2i(enemy.tile, Vector2i.ONE * enemy.size)):
+			return false
+	return true
 
 func reset_actions() -> void:
 	for hero: Hero in heroes:
@@ -185,7 +196,7 @@ func is_structure(tile: Vector2i) -> bool:
 	return defenses.has(tile) and STRUCTURE_HP.has(defenses[tile].kind)
 
 func is_terrain_blocked(tile: Vector2i) -> bool:
-	return tile in rocks or tile in trees
+	return layout.blocked(tile)
 
 func structure_max_hp(piece: Dictionary) -> int:
 	return STRUCTURE_HP[piece.kind] + (piece.level - 1) * 3 if piece.kind == "Wall" else STRUCTURE_HP[piece.kind]
@@ -198,7 +209,7 @@ func ballista_damage(piece: Dictionary) -> int:
 
 func wall_links(tile: Vector2i) -> Array[Vector2i]:
 	var links: Array[Vector2i] = []
-	for direction: Vector2i in DIRECTIONS:
+	for direction: Vector2i in CARDINALS:
 		var neighbor := tile + direction
 		if defenses.has(neighbor) and defenses[neighbor].kind == "Wall":
 			links.append(direction)
@@ -250,11 +261,9 @@ func reach_for(hero: Hero) -> Dictionary:
 		index += 1
 		if reach[tile] == hero.movement:
 			continue
-		for step: Vector2i in DIRECTIONS:
+		for step: Vector2i in STEPS:
 			var next := tile + step
-			if reach.has(next) or not on_board(next) or next == FIRE or is_terrain_blocked(next):
-				continue
-			if is_structure(next) or enemy_at(next) != null or hero_at(next) != null:
+			if reach.has(next) or not can_hero_step(tile, next):
 				continue
 			reach[next] = reach[tile] + 1
 			frontier.append(next)
@@ -268,15 +277,27 @@ func move_hero(hero: Hero, tile: Vector2i) -> Array[Vector2i]:
 	var cursor := tile
 	while cursor != hero.tile:
 		path.push_front(cursor)
-		for step: Vector2i in DIRECTIONS:
+		for step: Vector2i in STEPS:
 			var previous := cursor + step
-			if reach.get(previous, -1) == reach[cursor] - 1:
+			if reach.get(previous, -1) == reach[cursor] - 1 and can_hero_step(previous, cursor):
 				cursor = previous
 				break
 	hero.movement -= path.size()
 	hero.tile = tile
 	message = "%s moved." % hero.title if is_lit(tile) else "Darkness deals damage if you end your turn here."
 	return path
+
+func hero_tile_open(tile: Vector2i) -> bool:
+	return on_board(tile) and tile != FIRE and not is_terrain_blocked(tile) \
+		and not is_structure(tile) and enemy_at(tile) == null and hero_at(tile) == null
+
+func can_hero_step(from: Vector2i, to: Vector2i) -> bool:
+	var step := (to - from).abs()
+	if step == Vector2i.ZERO or maxi(step.x, step.y) != 1 or not hero_tile_open(to):
+		return false
+	if from.x == to.x or from.y == to.y:
+		return true
+	return hero_tile_open(Vector2i(from.x, to.y)) and hero_tile_open(Vector2i(to.x, from.y))
 
 func can_attack(hero: Hero, tile: Vector2i, pin: bool = false) -> bool:
 	return phase == Phase.PLAYER and hero.hp > 0 and hero.ap > 0 and hero.attacks > 0 \
@@ -412,16 +433,16 @@ func collect_loot() -> Array[String]:
 	return items
 
 func build(kind: String, tile: Vector2i) -> bool:
-	if phase != Phase.BUILD or not BUILD_COST.has(kind) or supplies < BUILD_COST[kind]:
-		return false
-	if not on_board(tile) or not is_lit(tile) or tile == FIRE or hero_at(tile) != null:
-		return false
-	if is_terrain_blocked(tile) or defenses.has(tile):
+	if not can_build_at(tile, kind):
 		return false
 	supplies -= BUILD_COST[kind]
 	defenses[tile] = {"kind": kind, "level": 1, "hp": STRUCTURE_HP[kind]}
 	message = "%s placed." % kind
 	return true
+
+func can_build_at(tile: Vector2i, kind: String) -> bool:
+	return phase == Phase.BUILD and BUILD_COST.has(kind) and supplies >= BUILD_COST[kind] and hero_tile_open(tile) \
+		and fallen_at(tile) == null
 
 func finish_wave_if_clear() -> bool:
 	if phase not in [Phase.PLAYER, Phase.ENEMY] or not enemies.is_empty():
@@ -432,7 +453,7 @@ func finish_wave_if_clear() -> bool:
 			var recovery: int = hero.character.trinket().get("wave_heal", 0)
 			hero.hp = mini(max_health(hero), hero.hp + recovery)
 	supplies += 4
-	if wave == spawns.size():
+	if wave == WAVES.size():
 		phase = Phase.VICTORY
 		message = "Dawn breaks. The party gained 6 XP and the camp gained 4 supplies."
 	else:
@@ -529,6 +550,15 @@ func can_enemy_enter(enemy: Enemy, origin: Vector2i, allow_structures: bool) -> 
 			return false
 	return true
 
+func can_enemy_step(enemy: Enemy, from: Vector2i, to: Vector2i, allow_structures: bool) -> bool:
+	var step := (to - from).abs()
+	if step == Vector2i.ZERO or maxi(step.x, step.y) != 1 or not can_enemy_enter(enemy, to, allow_structures):
+		return false
+	if from.x == to.x or from.y == to.y:
+		return true
+	return can_enemy_enter(enemy, Vector2i(from.x, to.y), false) \
+		and can_enemy_enter(enemy, Vector2i(to.x, from.y), false)
+
 func search_path(enemy: Enemy, goal: Vector2i, allow_structures: bool) -> Array[Vector2i]:
 	var frontier: Array[Vector2i] = [enemy.tile]
 	var previous := {enemy.tile: enemy.tile}
@@ -542,9 +572,9 @@ func search_path(enemy: Enemy, goal: Vector2i, allow_structures: bool) -> Array[
 				path.push_front(tile)
 				tile = previous[tile]
 			return path
-		for direction: Vector2i in DIRECTIONS:
+		for direction: Vector2i in STEPS:
 			var next := tile + direction
-			if not previous.has(next) and can_enemy_enter(enemy, next, allow_structures):
+			if not previous.has(next) and can_enemy_step(enemy, tile, next, allow_structures):
 				previous[next] = tile
 				frontier.append(next)
 	return []
@@ -564,6 +594,8 @@ func enemy_movement(enemy: Enemy) -> int:
 	return 1 if enemy.pinned else enemy.speed
 
 func step_enemy(enemy: Enemy, tile: Vector2i) -> bool:
+	if not can_enemy_step(enemy, enemy.tile, tile, true):
+		return false
 	var obstruction := structure_in_step(enemy, tile)
 	if on_board(obstruction):
 		attack_enemy_target(enemy, obstruction)
