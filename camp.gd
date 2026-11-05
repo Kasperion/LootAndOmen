@@ -42,7 +42,8 @@ const SPRITES := {
 	"priest": preload("res://art/heavy_ink/priest.png"),
 	"rock": preload("res://art/heavy_ink/rock.png"),
 	"tree": preload("res://art/heavy_ink/tree.png"),
-	"cliff": preload("res://art/heavy_ink/cliff.png"),
+	"rock_split": preload("res://art/heavy_ink/rock_split.svg"),
+	"rock_slab": preload("res://art/heavy_ink/rock_slab.svg"),
 	"dirt": preload("res://art/heavy_ink/dirt.png"),
 	"grass": preload("res://art/heavy_ink/grass.png"),
 	"trail": preload("res://art/heavy_ink/trail.png"),
@@ -126,9 +127,8 @@ func _ready() -> void:
 		animation_frames[key] = frames
 	add_child(audio)
 	night_shade = BoardArt.new().make_night_shade(Night.SIZE, Night.FIRE, CELL, Night.LIGHT_RADIUS)
-	make_button("Wall", "Wall  [2]", Vector2(935, 470), 98, choose_build.bind("Wall"))
-	make_button("Trap", "Trap  [1]", Vector2(1043, 470), 98, choose_build.bind("Trap"))
-	make_button("Ballista", "Ballista  [3]", Vector2(1151, 470), 112, choose_build.bind("Ballista"))
+	make_button("Wall", "Wall  [2]", Vector2(935, 470), 152, choose_build.bind("Wall"))
+	make_button("Ballista", "Ballista  [3]", Vector2(1099, 470), 164, choose_build.bind("Ballista"))
 	make_button("advance", "End Turn", Vector2(935, 646), 328, advance)
 	make_button("menu", "Menu", Vector2(1157, 3), 106, toggle_menu)
 	buttons.menu.size.y = 36
@@ -179,7 +179,7 @@ func _ready() -> void:
 		var item: Dictionary = Journey.GEAR[id]
 		make_button("buy_" + id, "Buy [%dg]" % item.price,
 			Vector2(322, 258 + i * 49), 101, buy.bind(id))
-		buttons["buy_" + id].tooltip_text = Journey.item_stats(id)
+		buttons["buy_" + id].tooltip_text = Journey.item_tooltip(id)
 	restart()
 
 func make_button(key: String, label: String, position_at: Vector2, width: int, action: Callable) -> void:
@@ -448,7 +448,7 @@ func refresh_day() -> void:
 		var id := journey.inventory[index]
 		var equip_button: Button = buttons["equip%d" % i]
 		equip_button.disabled = not journey.can_equip(active.character, index)
-		equip_button.tooltip_text = Journey.item_stats(id)
+		equip_button.tooltip_text = Journey.item_tooltip(id)
 		equip_button.show()
 		if journey.can_sell(index):
 			var sell_button: Button = buttons["sell%d" % i]
@@ -519,7 +519,7 @@ func equip(index: int) -> void:
 	if journey.can_equip(active.character, index):
 		var id := journey.inventory[index]
 		journey.equip(active.character, index)
-		day_message = "%s equipped %s." % [active.title, Journey.GEAR[id].name]
+		day_message = "%s equipped %s." % [active.title, Journey.item_data(id).name]
 		refresh()
 
 func buy(id: String) -> void:
@@ -531,7 +531,7 @@ func sell(index: int) -> void:
 	if journey.can_sell(index):
 		var id := journey.inventory[index]
 		if journey.sell(index):
-			day_message = "Sold %s." % Journey.GEAR[id].name
+			day_message = "Sold %s." % Journey.item_data(id).name
 			refresh()
 
 func advance_day() -> void:
@@ -979,6 +979,49 @@ func draw_game_menu() -> void:
 			label_at(Vector2(935, 83), "RESTART JOURNEY?", 21, GOLD)
 			label_at(Vector2(935, 125), "Current journey progress will be lost.", 16, MUTED)
 
+func draw_cliff(tile: Vector2i) -> void:
+	var origin := Vector2(tile) * CELL
+	var south := tile + Vector2i.DOWN not in night.cliffs
+	var top_height := CELL - 19 if south else CELL
+	var right := float(CELL)
+	var ledge := PackedVector2Array([origin + Vector2(0, top_height), origin + Vector2(13, top_height - 4),
+		origin + Vector2(29, top_height + 1), origin + Vector2(45, top_height - 3),
+		origin + Vector2(right, top_height)])
+	var top := PackedVector2Array([origin, origin + Vector2(right, 0)])
+	if south:
+		for i in range(ledge.size() - 1, -1, -1):
+			top.append(ledge[i])
+	else:
+		top.append(origin + Vector2(right, CELL))
+		top.append(origin + Vector2(0, CELL))
+	var rock := Color("#6c5c49")
+	draw_colored_polygon(top, rock)
+	var shade := Color("#4f4439")
+	draw_colored_polygon(PackedVector2Array([origin + Vector2(0, 19), origin + Vector2(16, 14),
+		origin + Vector2(27, 19), origin + Vector2(47, 13), origin + Vector2(right, 19),
+		origin + Vector2(right, 25), origin + Vector2(44, 20), origin + Vector2(27, 25),
+		origin + Vector2(13, 21), origin + Vector2(0, 25)]), shade)
+	draw_polyline(PackedVector2Array([origin + Vector2(17, 11), origin + Vector2(25, 7),
+		origin + Vector2(33, 9)]), Color("#9a8159"), 2.0, true)
+	var edge := Color("#211a1c")
+	if south:
+		var face := ledge.duplicate()
+		face.append(origin + Vector2(right, CELL))
+		face.append(origin + Vector2(0, CELL))
+		draw_colored_polygon(face, Color("#453a37"))
+		draw_polyline(ledge, edge, 3.0, true)
+		for i in [1, 2, 3]:
+			var foot := Vector2(ledge[i].x - 5, origin.y + CELL)
+			draw_line(ledge[i], foot, edge, 2.5, true)
+			draw_line(ledge[i] + Vector2(4, 4), foot + Vector2(5, -3), Color("#77665a"), 2.0, true)
+		draw_line(origin + Vector2(0, CELL), origin + Vector2(right, CELL), edge, 3.0)
+	if tile + Vector2i.UP not in night.cliffs:
+		draw_line(origin, origin + Vector2(right, 0), edge, 3.0)
+	if tile + Vector2i.LEFT not in night.cliffs:
+		draw_line(origin, origin + Vector2(0, CELL), edge, 3.0)
+	if tile + Vector2i.RIGHT not in night.cliffs:
+		draw_line(origin + Vector2(right, 0), origin + Vector2(right, CELL), edge, 3.0)
+
 func draw_board() -> void:
 	var hovered := tile_at(screen_to_world(get_local_mouse_position()))
 	var board_rect := Rect2(BOARD, Vector2(Night.SIZE) * CELL)
@@ -991,9 +1034,10 @@ func draw_board() -> void:
 			draw_texture_rect(SPRITES[ground], Rect2(Vector2(x, y) * CELL, extent), false, Color(1, 1, 1, 0.20))
 	draw_sprite("wheel", center(Night.FIRE) + Vector2(-42, -29), 24.0)
 	for tile: Vector2i in night.cliffs:
-		draw_sprite("cliff", center(tile), 57.0)
+		draw_cliff(tile)
 	for tile: Vector2i in night.rocks:
-		draw_sprite("rock", center(tile), 48.0)
+		var variant := posmod(tile.x * 7 + tile.y * 11 + journey.site, 3)
+		draw_sprite(["rock", "rock_split", "rock_slab"][variant], center(tile), 51.0)
 	for tile: Vector2i in night.trees:
 		draw_sprite("tree", center(tile), 60.0)
 	if night.fire_hp > 0:
@@ -1181,9 +1225,6 @@ func draw_defense(tile: Vector2i, piece: Dictionary) -> void:
 	match piece.kind:
 		"Wall":
 			draw_linked_wall(tile, at, piece.level, hp_ratio, impact)
-		"Trap":
-			draw_arc(at, 10, 0, TAU, 16, GOLD, 2, true)
-			draw_line(at + Vector2(-9, 8), at + Vector2(9, -8), GOLD, 2, true)
 		"Ballista":
 			var recoil := Vector2(5, -4) * sin(arrow_progress * PI) if firing_tile == tile else Vector2.ZERO
 			var tint := Color.WHITE.lerp(Color("#ff9b88"), impact)
@@ -1313,14 +1354,17 @@ func draw_loadout() -> void:
 	if not hovered_id.is_empty() and menu == Menu.CLOSED:
 		var tooltip := Rect2(637, 346, 282, 55)
 		draw_hud_frame(tooltip, Color("#221b21"), GOLD)
-		label_at(tooltip.position + Vector2(10, 20), Journey.GEAR[hovered_id].name, 15, GOLD)
+		var item := Journey.item_data(hovered_id)
+		label_at(tooltip.position + Vector2(10, 20), "%s  /  %s" % [
+			Journey.RARITY_NAMES[item.rarity], item.name], 14, Journey.RARITY_COLORS[item.rarity])
 		label_at(tooltip.position + Vector2(10, 42), Journey.item_stats(hovered_id), 14)
 	if active == night.priest:
 		label_at(Vector2(931, 434), "Heal +%d HP   •   Revive 1 AP" % night.heal_power(), 14, MUTED)
 	if character.shield_guard() > 0 or character.armor_guard() > 0:
-		var protection := "Shield −%d   Armor −%d" % [character.shield_guard(), character.armor_guard()]
+		var protection := "Armor −%d" % character.armor_guard()
 		if active == night.knight:
-			protection += "   Defend −%d extra" % (1 + character.rank_of("guard"))
+			protection = "Shield −%d   %s   Defend −%d extra" % [
+				character.shield_guard(), protection, 1 + character.rank_of("guard")]
 		label_at(Vector2(931, 447), protection, 14, MUTED)
 
 func draw_sidebar() -> void:
@@ -1348,14 +1392,23 @@ func draw_item_row(rect: Rect2, id: String, prefix := "", stats := false) -> voi
 	if id.is_empty():
 		label_at(rect.position + Vector2(33, 18), prefix + "Empty", 15, MUTED)
 		return
-	var index := Journey.GEAR.keys().find(id)
+	var item := Journey.item_data(id)
+	var index := Journey.GEAR.keys().find(item.base_id)
 	var icon_side := 21.0 if not stats else 32.0
 	var icon := Rect2(rect.position + Vector2(4, (rect.size.y - icon_side) * 0.5), Vector2.ONE * icon_side)
 	draw_texture_rect_region(ITEM_ATLAS, icon, Rect2(index * 48, 0, 48, 48))
 	var text_x := 33 if not stats else 42
-	label_at(rect.position + Vector2(text_x, 18), prefix + Journey.GEAR[id].name, 15)
+	var text_width := rect.size.x - text_x - 6.0
+	var name_text: String = prefix + item.name
+	var font := ThemeDB.fallback_font
+	var name_width := font.get_string_size(name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x
+	var name_size := mini(15, floori(15 * text_width / name_width))
+	label_at(rect.position + Vector2(text_x, 18), name_text, name_size, Journey.RARITY_COLORS[item.rarity])
 	if stats:
-		label_at(rect.position + Vector2(text_x, 35), Journey.item_stats(id), 13, MUTED)
+		var detail := Journey.item_stats(id)
+		var detail_width := font.get_string_size(detail, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+		var detail_size := mini(13, floori(13 * text_width / detail_width))
+		label_at(rect.position + Vector2(text_x, 35), detail, detail_size, MUTED)
 
 func draw_day() -> void:
 	if day == Day.ROAD or (day == Day.DUSK and not dusk_equipment):
@@ -1401,17 +1454,18 @@ func draw_road() -> void:
 	draw_circle(sun, 41, Color(1, 0.55, 0.24, 0.16), true, -1, true)
 	draw_circle(sun, 30, Color("#f5a567"), true, -1, true)
 	draw_rect(Rect2(0, 0, 1280, 720), Color(0.13, 0.08, 0.21, 0.48 * progress))
-	for i in 5:
-		var x := fposmod(i * 330.0 - time * (56.0 + (i % 2) * 27.0), 1650.0) - 120.0
-		draw_sprite("tree", Vector2(x, 420 + (i % 2) * 40), 220.0 + (i % 2) * 55,
-			Color("#9f807b").darkened(progress * 0.26))
-	var wagon := Vector2(475 + progress * 116, 558)
-	draw_sprite("wagon", wagon, 235.0)
-	draw_wheel(wagon + Vector2(-65, 49), time, 25.0)
-	draw_wheel(wagon + Vector2(18, 49), time, 25.0)
+	var wagon := Vector2(439 + progress * 116, 514)
+	draw_sprite("wagon", wagon, 345.0)
+	draw_wheel(wagon + Vector2(-93, 83), time, 28.0)
+	draw_wheel(wagon + Vector2(18, 83), time, 28.0)
 	var gait := [0, 1, 2, 1]
 	var step: int = gait[int(time * 8.0) % gait.size()] if day == Day.ROAD else 0
-	draw_sprite("horse_%d" % step, wagon + Vector2(178, 7), 166.0)
+	var horse := wagon + Vector2(248, 41)
+	draw_sprite("horse_%d" % step, horse, 202.0)
+	var hitch := wagon + Vector2(157, 55)
+	var harness := horse + Vector2(-22, 1)
+	draw_line(hitch, harness, Color("#241719"), 6.0, true)
+	draw_line(hitch, harness, Color("#ae8455"), 2.0, true)
 	draw_hud_frame(Rect2(22, 23, 415, 67), Color("#231d24"))
 	label_at(Vector2(38, 49), "THE ROAD TO STONEFORD", 21, GOLD)
 	label_at(Vector2(38, 73), "The sun is setting" if day == Day.ROAD else "Arrived at dusk", 16)

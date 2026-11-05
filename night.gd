@@ -52,7 +52,7 @@ const FORD_CLIFFS := [Vector2i(0, 0), Vector2i(1, 0), Vector2i(2, 0), Vector2i(3
 	Vector2i(0, 1), Vector2i(0, 2), Vector2i(1, 1), Vector2i(19, 13), Vector2i(20, 13),
 	Vector2i(17, 14), Vector2i(18, 14), Vector2i(19, 14), Vector2i(20, 14), Vector2i(20, 12)]
 const DIRECTIONS := [Vector2i.RIGHT, Vector2i.DOWN, Vector2i.LEFT, Vector2i.UP]
-const BUILD_COST := {"Wall": 2, "Trap": 1, "Ballista": 3}
+const BUILD_COST := {"Wall": 2, "Ballista": 3}
 const STRUCTURE_HP := {"Wall": 5, "Ballista": 4}
 const MAX_STRUCTURE_LEVEL := 3
 const FIX_COST := 1
@@ -392,12 +392,20 @@ func damage_enemy(enemy: Enemy, amount: int, killer: Hero = null) -> void:
 		kills += 1
 		if killer != null:
 			killer.character.xp += 4
+			var recovery: int = killer.character.weapon().get("kill_heal", 0)
+			killer.hp = mini(max_health(killer), killer.hp + recovery)
+		if enemy.kind == "boss":
+			var boss_gear := ["war_bow", "iron_sword", "pilgrim_mace", "quilted_coat", "reinforced_shield"]
+			drop_gear(enemy.tile, Journey.roll_loot(boss_gear.pick_random(), true))
 		if kills == 1 or kills == 4:
 			var items := [["longbow", "quilted_coat"], ["iron_sword", "reinforced_shield"]]
 			var id: String = items[journey.site][0 if kills == 1 else 1]
-			if not loot.has(enemy.tile):
-				loot[enemy.tile] = []
-			loot[enemy.tile].append(id)
+			drop_gear(enemy.tile, Journey.roll_loot(id, false))
+
+func drop_gear(tile: Vector2i, id: String) -> void:
+	if not loot.has(tile):
+		loot[tile] = []
+	loot[tile].append(id)
 
 func collect_loot() -> Array[String]:
 	var items: Array[String] = []
@@ -419,10 +427,7 @@ func build(kind: String, tile: Vector2i) -> bool:
 	if is_terrain_blocked(tile) or defenses.has(tile):
 		return false
 	supplies -= BUILD_COST[kind]
-	var piece := {"kind": kind, "level": 1}
-	if STRUCTURE_HP.has(kind):
-		piece.hp = structure_max_hp(piece)
-	defenses[tile] = piece
+	defenses[tile] = {"kind": kind, "level": 1, "hp": STRUCTURE_HP[kind]}
 	message = "%s placed." % kind
 	return true
 
@@ -569,13 +574,6 @@ func step_enemy(enemy: Enemy, tile: Vector2i) -> bool:
 		attack_enemy_target(enemy, obstruction)
 		return false
 	enemy.tile = tile
-	for trap_tile: Vector2i in footprint_at(tile, enemy.size):
-		if defenses.has(trap_tile) and defenses[trap_tile].kind == "Trap":
-			defenses.erase(trap_tile)
-			damage_enemy(enemy, 3)
-			message = "A creature triggered a trap."
-			if not enemies.has(enemy):
-				return false
 	return true
 
 func can_reach_melee(origin: Vector2i, size: int, target: Vector2i) -> bool:
